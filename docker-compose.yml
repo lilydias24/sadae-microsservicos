@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # API Gateway
+  api-gateway:
+    build: 
+      context: .
+      dockerfile: ./services/api-gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      
+      - MAINTENANCE_SERVICE_URL=http://maintenance-service:8003
+      
+    depends_on:
+      - auth-service
+      
+      - maintenance-service
+     
+    networks:
+      - sadae-network
+
+  # Authentication Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
+      - JWT_SECRET=your-super-secret-jwt-key
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_HOURS=24
+    depends_on:
+      - auth-db
+    networks:
+      - sadae-network
+
+
+
+  # Maintenance Service
+  maintenance-service:
+    build:
+      context: .
+      dockerfile: ./services/maintenance-service/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://maintenance_user:maintenance_pass@maintenance-db:5432/maintenance_db
+      - JWT_SECRET=your-super-secret-jwt-key
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_HOURS=24
+    depends_on:
+      - maintenance-db
+    networks:
+      - sadae-network
+
+
+
+
+
+
+
+  # Databases
+  auth-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=auth_db
+      - POSTGRES_USER=auth_user
+      - POSTGRES_PASSWORD=auth_pass
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+
+
+
+  maintenance-db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=maintenance_db
+      - POSTGRES_USER=maintenance_user
+      - POSTGRES_PASSWORD=maintenance_pass
+    volumes:
+      - maintenance_db_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+
+
+
+
+
+
+
+  # Redis for caching and real-time data
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - sadae-network
+
+  # Frontend Application
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - api-gateway
+    networks:
+      - sadae-network
+
+volumes:
+  auth_db_data:
+  
+  maintenance_db_data:
+
+
+networks:
+  sadae-network:
+    driver: bridge
