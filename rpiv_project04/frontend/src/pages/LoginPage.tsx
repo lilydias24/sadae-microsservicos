@@ -232,7 +232,7 @@ export const LoginPage: React.FC = () => {
                   <option value="operator">Operador</option>
                   <option value="maintenance_manager">Gestor de Manutenção</option>
                   <option value="financial_manager">Gestor Financeiro</option>
-                  <option value="crisis_manager">Gestor de Crise</option>
+                  <option value="crise">Gestor de Crise</option>
                   <option value="support_agent">Agente de Suporte</option>
                 </select>
               </div>

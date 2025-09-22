@@ -55,7 +55,7 @@ def get_current_user(token: str = None):
     if token:
         return verify_token(token)
     # Return a mock user for testing
-    return {"sub": "1", "username": "admin", "roles": ["crisis_manager", "operator"]}
+    return {"sub": "1", "username": "admin", "roles": ["crise", "operator"]}
 
 def require_roles(current_user: dict, required_roles: list):
     """Check if user has required roles - simplified version"""

@@ -12,7 +12,7 @@ Base = declarative_base()
 class UserRole(str, Enum):
     OPERATOR = "operator"
     CITIZEN = "citizen"
-    CRISIS_MANAGER = "crisis_manager"
+    CRISIS_MANAGER = "crise"
     MAINTENANCE_MANAGER = "maintenance_manager"
     FINANCIAL_MANAGER = "financial_manager"
     SUPPORT_AGENT = "support_agent"

@@ -56,7 +56,7 @@ function App() {
                 <Route
                   path="/crisis/*"
                   element={
-                    <ProtectedRoute allowedRoles={["crisis_manager"]}>
+                    <ProtectedRoute allowedRoles={["crise"]}>
                       <Layout>
                         <CrisisPage />
                       </Layout>

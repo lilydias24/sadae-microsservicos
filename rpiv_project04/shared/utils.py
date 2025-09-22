@@ -55,7 +55,7 @@ class ServiceRegistry:
             "monitoring": os.getenv("MONITORING_SERVICE_URL", "http://monitoring-service:8002"),
             "maintenance": os.getenv("MAINTENANCE_SERVICE_URL", "http://maintenance-service:8003"),
             "billing": os.getenv("BILLING_SERVICE_URL", "http://billing-service:8004"),
-            "crisis": os.getenv("CRISIS_SERVICE_URL", "http://crisis-service:8005"),
+            "crise": os.getenv("CRISIS_SERVICE_URL", "http://crisis-service:8005"),
             "support": os.getenv("SUPPORT_SERVICE_URL", "http://support-service:8006"),
             "notification": os.getenv("NOTIFICATION_SERVICE_URL", "http://notification-service:8007"),
         }

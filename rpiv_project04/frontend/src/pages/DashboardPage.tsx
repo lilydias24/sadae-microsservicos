@@ -59,7 +59,7 @@ export const DashboardPage: React.FC = () => {
           { title: "Taxa de Cobrança", value: "96%", icon: CreditCard, color: "bg-green-500" },
           { title: "Inadimplência", value: "4%", icon: AlertTriangle, color: "bg-red-500" },
         ]
-      case "crisis_manager":
+      case "crise":
         return [
           { title: "Eventos Críticos", value: "2", icon: AlertTriangle, color: "bg-red-500" },
           { title: "Simulações Ativas", value: "1", icon: Activity, color: "bg-blue-500" },
@@ -112,7 +112,7 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* Charts Section - Only for technical users */}
-      {["operator", "crisis_manager", "maintenance_manager"].includes(user?.role || "") && (
+      {["operator", "crise", "maintenance_manager"].includes(user?.role || "") && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Water Level Chart */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
