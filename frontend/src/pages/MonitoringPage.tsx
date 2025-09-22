@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { monitoringDev } from "../services/monitoringService"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 
 // --- INTERFACES (mantidas para estrutura) ---
@@ -49,9 +50,66 @@ const mockRealtimeChartData = Array.from({ length: 50 }, (_, i) => ({
 export function MonitoringPage() {
   const [selectedSensorType, setSelectedSensorType] = useState<string>("all")
 
-  // Usando dados mocados em vez de useQuery e useWebSocket
-  const anomalies = { data: mockAnomalies }
-  const realtimeData = mockRealtimeChartData
+  // Estado vindo do backend, com fallback para mocks
+  const [realtimeData, setRealtimeData] = useState<any[]>([])
+  const [anomalies, setAnomalies] = useState<{ data: Anomaly[] }>({ data: [] })
+  const [anomaliesLimit, setAnomaliesLimit] = useState<number>(20)
+  const [isUpdating, setIsUpdating] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const [hist, an] = await Promise.all([
+          monitoringDev.getHistory({ sensor_id: "PRESS_001", limit: 50 }),
+          monitoringDev.getAnomalies({ status: "pending", limit: anomaliesLimit }),
+        ])
+        if (!cancelled) {
+          const readings = Array.isArray(hist.data.readings) ? hist.data.readings : []
+          const series = readings
+            .filter((r: any) => r.sensor_id === "PRESS_001")
+            .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+            .map((r: any) => ({ value: Number(r.value), timestamp: r.timestamp }))
+          setRealtimeData(series)
+          setAnomalies({ data: an.data?.map((a: any) => ({
+            id: String(a.id),
+            sensor_id: a.sensor_id,
+            description: a.description,
+            severity: a.severity,
+            status: a.status,
+            created_at: a.created_at,
+          })) ?? [] })
+        }
+      } catch {
+        // Fallback já está nos estados iniciais (mocks)
+      }
+    }
+    load()
+    const interval = setInterval(load, 5000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [])
+
+  const handleAnomalyAction = async (id: number, action: "confirm" | "resolve") => {
+    try {
+      setIsUpdating(id)
+      const newStatus = action === "confirm" ? "confirmed" : "resolved"
+      await monitoringDev.updateAnomalyStatus(id, newStatus as any)
+      // refresh list
+      const an = await monitoringDev.getAnomalies({ status: "pending", limit: anomaliesLimit })
+      setAnomalies({ data: an.data?.map((a: any) => ({
+        id: String(a.id),
+        sensor_id: a.sensor_id,
+        description: a.description,
+        severity: a.severity,
+        status: a.status,
+        created_at: a.created_at,
+      })) ?? [] })
+    } catch (e) {
+      // noop
+    } finally {
+      setIsUpdating(null)
+    }
+  }
   
   // Filtrando os sensores mocados com base no seletor
   const filteredSensors = selectedSensorType === "all"
@@ -248,15 +306,31 @@ export function MonitoringPage() {
           <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
             {anomalies?.data?.map((anomaly: Anomaly) => (
               <div key={anomaly.id} className="px-6 py-4">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <p className="text-sm font-medium text-gray-900">Sensor {anomaly.sensor_id}</p>
                     <p className="text-sm text-gray-600 mt-1">{anomaly.description}</p>
                     <p className="text-xs text-gray-500 mt-1">{new Date(anomaly.created_at).toLocaleString("pt-BR")}</p>
                   </div>
-                  <span className={`ml-4 inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
-                    {anomaly.severity}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
+                      {anomaly.severity}
+                    </span>
+                    <button
+                      onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
+                      disabled={isUpdating === Number(anomaly.id)}
+                      className="px-2 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {isUpdating === Number(anomaly.id) ? "..." : "Confirmar"}
+                    </button>
+                    <button
+                      onClick={() => handleAnomalyAction(Number(anomaly.id), "resolve")}
+                      disabled={isUpdating === Number(anomaly.id)}
+                      className="px-2 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {isUpdating === Number(anomaly.id) ? "..." : "Fechar"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

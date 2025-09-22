@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  monitoring-service:
+    build:
+      context: .
+      dockerfile: ./services/monitoring-service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL_MONITORING=postgresql://monitoring_user:monitoring_pass@monitoring-db:5432/monitoring_db
+      - REDIS_HOST=redis
+      - DEV_NO_AUTH=true
+    depends_on:
+      - monitoring-db
+      - redis
+    networks:
+      - sadae-network
+
+  monitoring-db:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=monitoring_db
+      - POSTGRES_USER=monitoring_user
+      - POSTGRES_PASSWORD=monitoring_pass
+    volumes:
+      - monitoring_db_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - sadae-network
+
+volumes:
+  monitoring_db_data:
+
+networks:
+  sadae-network:
+    driver: bridge
+
+
