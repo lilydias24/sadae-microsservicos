@@ -67,55 +67,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (username: string, password: string) => {
     try {
-      // Para demonstração, simulamos um login bem-sucedido
-      // Na implementação real, isso faria uma chamada para a API
-      const mockUser: User = {
-        user_id: 1,
+      const response = await api.post('/login', {
         username,
-        email: `${username}@example.com`,
-        full_name: username.charAt(0).toUpperCase() + username.slice(1),
-        role: username,
-        is_active: true
-      }
+        password
+      })
       
-      const mockToken = `mock-jwt-token-${Date.now()}`
+      const { access_token, user: userData } = response.data
 
-      setToken(mockToken)
-      setUser(mockUser)
+      setToken(access_token)
+      setUser(userData)
 
-      localStorage.setItem("token", mockToken)
-      localStorage.setItem("user", JSON.stringify(mockUser))
-    } catch (error) {
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(userData))
+
+      api.defaults.headers.common["Authorization"] = `Bearer ${access_token}`
+    } catch (error: any) {
+      console.error("Login error:", error.response?.data || error.message)
       throw error
     }
   }
 
   const register = async (userData: RegisterData) => {
     try {
-      // Simulação de registro - na implementação real, faria chamada para API
-      console.log("Registering user:", userData)
+      const response = await api.post('/auth/register', userData)
+      const { access_token, user: registeredUser } = response.data
       
-      // Criar usuário mockado baseado nos dados fornecidos
-      const mockUser: User = {
-        user_id: Math.floor(Math.random() * 1000),
-        username: userData.username,
-        email: userData.email,
-        full_name: userData.full_name,
-        role: userData.role,
-        is_active: true
-      }
-      
-      const mockToken = `mock-jwt-token-${Date.now()}`
+      setToken(access_token)
+      setUser(registeredUser)
 
-      setToken(mockToken)
-      setUser(mockUser)
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(registeredUser))
 
-      localStorage.setItem("token", mockToken)
-      localStorage.setItem("user", JSON.stringify(mockUser))
-      
-      console.log("User registered successfully:", mockUser)
-    } catch (error) {
-      console.error("Registration error:", error)
+      api.defaults.headers.common["Authorization"] = `Bearer ${access_token}`
+    } catch (error: any) {
+      console.error("Register error:", error.response?.data || error.message)
       throw error
     }
   }

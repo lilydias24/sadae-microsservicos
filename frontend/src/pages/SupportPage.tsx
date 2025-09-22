@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { 
   MessageSquare, 
@@ -177,15 +178,8 @@ export function SupportPage() {
   const fetchTickets = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/support/tickets', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setTickets(data)
-      }
+      const { data } = await api.get('/support/tickets')
+      setTickets(data)
     } catch (error) {
       console.error('Error fetching tickets:', error)
     } finally {
@@ -270,15 +264,8 @@ export function SupportPage() {
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await fetch('/support/dashboard', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setDashboardStats(data)
-      }
+      const { data } = await api.get('/support/dashboard')
+      setDashboardStats(data)
     } catch (error) {
       console.error('Error fetching dashboard stats:', error)
     }
@@ -286,15 +273,8 @@ export function SupportPage() {
 
   const fetchAgentDashboardStats = async () => {
     try {
-      const response = await fetch('/support/agent-dashboard', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setAgentDashboardStats(data)
-      }
+      const { data } = await api.get('/support/agent-dashboard')
+      setAgentDashboardStats(data)
     } catch (error) {
       console.error('Error fetching agent dashboard stats:', error)
     }
@@ -302,15 +282,10 @@ export function SupportPage() {
 
   const fetchTicketMessages = async (ticketId: number) => {
     try {
-      const response = await fetch(`/support/tickets/${ticketId}/messages?include_internal=${showInternalMessages}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const { data } = await api.get(`/support/tickets/${ticketId}/messages`, {
+        params: { include_internal: showInternalMessages },
       })
-      if (response.ok) {
-        const data = await response.json()
-        setTicketMessages(data)
-      }
+      setTicketMessages(data)
     } catch (error) {
       console.error('Error fetching ticket messages:', error)
     }
@@ -320,23 +295,13 @@ export function SupportPage() {
     e.preventDefault()
     try {
       setLoading(true)
-      const response = await fetch('/support/tickets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(newTicket)
-      })
-
-      if (response.ok) {
-        const ticket = await response.json()
-        setTickets([ticket, ...tickets])
-        setNewTicket({ title: '', description: '', category: 'request', priority: 'medium' })
-        setShowCreateTicket(false)
-      }
+      const { data } = await api.post('/support/tickets', newTicket)
+      setTickets([data, ...tickets])
+      setNewTicket({ title: '', description: '', category: 'request', priority: 'medium' })
+      setShowCreateTicket(false)
     } catch (error) {
       console.error('Error creating ticket:', error)
+      alert('Não foi possível criar o ticket. Verifique os dados e tente novamente.')
     } finally {
       setLoading(false)
     }
@@ -347,19 +312,9 @@ export function SupportPage() {
     if (!selectedTicket || !newMessage.trim()) return
 
     try {
-      const response = await fetch(`/support/tickets/${selectedTicket.id}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ content: newMessage })
-      })
-
-      if (response.ok) {
-        setNewMessage('')
-        fetchTicketMessages(selectedTicket.id)
-      }
+      await api.post(`/support/tickets/${selectedTicket.id}/messages`, { content: newMessage })
+      setNewMessage('')
+      fetchTicketMessages(selectedTicket.id)
     } catch (error) {
       console.error('Error sending message:', error)
     }
@@ -423,18 +378,8 @@ export function SupportPage() {
     if (!selectedTicket) return
 
     try {
-      const response = await fetch(`/support/tickets/${selectedTicket.id}/evaluate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(evaluationForm)
-      })
-
-      if (response.ok) {
-        // Update ticket with evaluation
-        setTickets(prev => prev.map(ticket => 
+      await api.post(`/support/tickets/${selectedTicket.id}/evaluate`, evaluationForm)
+      setTickets(prev => prev.map(ticket => 
           ticket.id === selectedTicket.id 
             ? {
                 ...ticket,
@@ -446,10 +391,9 @@ export function SupportPage() {
               }
             : ticket
         ))
-        setShowEvaluation(false)
-        setEvaluationForm({ rating: 5, comment: '' })
-        alert('Avaliação enviada com sucesso! Obrigado pelo seu feedback.')
-      }
+      setShowEvaluation(false)
+      setEvaluationForm({ rating: 5, comment: '' })
+      alert('Avaliação enviada com sucesso! Obrigado pelo seu feedback.')
     } catch (error) {
       console.error('Error submitting evaluation:', error)
       alert('Erro ao enviar avaliação. Tente novamente.')

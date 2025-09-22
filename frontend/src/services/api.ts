@@ -1,8 +1,10 @@
 import axios from "axios"
 
+const baseURL = (process.env.REACT_APP_API_URL || (typeof window !== 'undefined' ? (window as any).__API_URL__ : undefined) || "http://localhost:8001") as string
+
 export const api = axios.create({
-  baseURL: "http://localhost:8000",
-  timeout: 10000,
+  baseURL,
+  timeout: 15000,
 })
 
 // Request interceptor
