@@ -1,6 +1,7 @@
 {
-  "name": "my-v0-project",
+  "name": "sadae-frontend",
   "version": "0.1.0",
+  "description": "Sistema de Análise de Dados de Abastecimento e Esgoto - Interface Frontend",
   "private": true,
   "scripts": {
     "build": "next build",

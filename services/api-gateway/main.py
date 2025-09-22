@@ -5,57 +5,76 @@ import httpx
 import os
 import sys
 
-# Add shared modules to path
+# Adiciona os módulos compartilhados ao caminho Python
 sys.path.append('/app/shared')
 
 try:
     from auth import verify_token
     from utils import service_registry
 except ImportError as e:
-    print(f"Warning: Could not import shared modules: {e}")
-    # Fallback function
+    print(f"Aviso: Não foi possível importar módulos compartilhados: {e}")
+    # Função de fallback para desenvolvimento local
     def verify_token(token: str):
         return {"sub": "fallback_user", "user_id": "1", "role": "user"}
     
-    # Fallback service registry
+    # Registry de serviços de fallback
     service_registry = {}
 
+# Aplicação FastAPI principal - Gateway de entrada para todos os microsserviços
 app = FastAPI(
     title="SADAE API Gateway",
-    description="API Gateway for SADAE - Sistema de Análise de Dados de Abastecimento e Esgoto",
+    description="Gateway API para SADAE - Sistema de Análise de Dados de Abastecimento e Esgoto",
     version="1.0.0"
 )
 
-# CORS middleware
+# Middleware CORS - Permite requisições do frontend React
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://frontend:3000"],
+    allow_origins=["http://localhost:3000", "http://frontend:3000"],  # URLs permitidas do frontend
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Permite todos os métodos HTTP (GET, POST, PUT, DELETE)
+    allow_headers=["*"],  # Permite todos os cabeçalhos
 )
 
+# Esquema de segurança HTTP Bearer para JWT tokens
 security = HTTPBearer()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify JWT token and get current user"""
+    """
+    Verifica o token JWT e retorna os dados do usuário atual
+    
+    Args:
+        credentials: Credenciais HTTP Bearer com token JWT
+        
+    Returns:
+        dict: Dados do usuário decodificados do token
+    """
     token = credentials.credentials
     payload = verify_token(token)
     return payload
 
 @app.get("/")
 async def root():
+    """Endpoint raiz - Informações básicas do gateway"""
     return {"message": "SADAE API Gateway", "version": "1.0.0"}
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Verificação de saúde do gateway - Status operacional"""
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
 
-# Authentication routes
+# Rotas de Autenticação - Proxy para o serviço de autenticação
 @app.post("/auth/login")
 async def login(request: Request):
-    """Proxy login request to auth service"""
+    """
+    Proxy da requisição de login para o serviço de autenticação
+    
+    Args:
+        request: Requisição HTTP com dados de login (email, senha)
+        
+    Returns:
+        dict: Token JWT e dados do usuário autenticado
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
@@ -68,7 +87,15 @@ async def login(request: Request):
 
 @app.post("/auth/register")
 async def register(request: Request):
-    """Proxy register request to auth service"""
+    """
+    Proxy da requisição de registro para o serviço de autenticação
+    
+    Args:
+        request: Requisição HTTP com dados de registro (nome, email, senha, role)
+        
+    Returns:
+        dict: Usuário criado e token de acesso
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
@@ -79,10 +106,18 @@ async def register(request: Request):
         )
         return response.json()
 
-# Monitoring routes
+# Rotas de Monitoramento - Proxy para o serviço de monitoramento de sensores
 @app.get("/monitoring/sensors")
 async def get_sensors(current_user: dict = Depends(get_current_user)):
-    """Get all sensors data"""
+    """
+    Obtém dados de todos os sensores IoT do sistema
+    
+    Args:
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        list: Lista com todos os sensores e seus dados atuais
+    """
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('monitoring')}/sensors",
@@ -92,7 +127,15 @@ async def get_sensors(current_user: dict = Depends(get_current_user)):
 
 @app.get("/monitoring/readings/realtime")
 async def get_realtime_readings(current_user: dict = Depends(get_current_user)):
-    """Get real-time sensor readings"""
+    """
+    Obtém leituras de sensores em tempo real via WebSocket
+    
+    Args:
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        dict: Dados em tempo real dos sensores (pressão, vazão, temperatura)
+    """
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('monitoring')}/readings/realtime",
@@ -102,7 +145,16 @@ async def get_realtime_readings(current_user: dict = Depends(get_current_user)):
 
 @app.post("/monitoring/anomalies")
 async def create_anomaly(request: Request, current_user: dict = Depends(get_current_user)):
-    """Create anomaly alert"""
+    """
+    Cria um alerta de anomalia no sistema de monitoramento
+    
+    Args:
+        request: Requisição HTTP com dados da anomalia (sensor_id, type, severity)
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        dict: Anomalia criada com ID e timestamp
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
@@ -116,10 +168,18 @@ async def create_anomaly(request: Request, current_user: dict = Depends(get_curr
         )
         return response.json()
 
-# Maintenance routes
+# Rotas de Manutenção - Proxy para o serviço de manutenção e ordens de serviço
 @app.get("/maintenance/orders")
 async def get_service_orders(current_user: dict = Depends(get_current_user)):
-    """Get service orders"""
+    """
+    Obtém todas as ordens de serviço de manutenção
+    
+    Args:
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        list: Lista de ordens de serviço com status, prioridade e equipe responsável
+    """
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('maintenance')}/orders",
@@ -129,7 +189,16 @@ async def get_service_orders(current_user: dict = Depends(get_current_user)):
 
 @app.post("/maintenance/orders")
 async def create_service_order(request: Request, current_user: dict = Depends(get_current_user)):
-    """Create service order"""
+    """
+    Cria uma nova ordem de serviço de manutenção
+    
+    Args:
+        request: Requisição HTTP com dados da ordem (descrição, prioridade, sensor_id, local)
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        dict: Ordem de serviço criada com ID, status e equipe atribuída
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
@@ -143,10 +212,18 @@ async def create_service_order(request: Request, current_user: dict = Depends(ge
         )
         return response.json()
 
-# Billing routes
+# Rotas de Faturamento - Proxy para o serviço de faturamento e cobrança
 @app.get("/billing/bills")
 async def get_bills(current_user: dict = Depends(get_current_user)):
-    """Get bills"""
+    """
+    Obtém todas as faturas de água e esgoto do usuário
+    
+    Args:
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        list: Lista de faturas com valores, vencimentos e status de pagamento
+    """
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('billing')}/bills",
@@ -156,7 +233,16 @@ async def get_bills(current_user: dict = Depends(get_current_user)):
 
 @app.post("/billing/contests")
 async def create_bill_contest(request: Request, current_user: dict = Depends(get_current_user)):
-    """Contest a bill"""
+    """
+    Cria uma contestação de fatura para revisão
+    
+    Args:
+        request: Requisição HTTP com dados da contestação (bill_id, motivo, evidências)
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        dict: Contestação criada com protocolo e prazo para análise
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
@@ -170,10 +256,19 @@ async def create_bill_contest(request: Request, current_user: dict = Depends(get
         )
         return response.json()
 
-# Crisis management routes
+# Rotas de Gestão de Crises - Proxy para o serviço de emergências hídricas
 @app.post("/crisis/alerts")
 async def create_crisis_alert(request: Request, current_user: dict = Depends(get_current_user)):
-    """Create crisis alert"""
+    """
+    Cria um alerta de situação crítica no abastecimento
+    
+    Args:
+        request: Requisição HTTP com dados da crise (tipo, localização, severidade)
+        current_user: Usuário autenticado via JWT
+        
+    Returns:
+        dict: Alerta de crise criado com plano de evacuação e recursos necessários
+    """
     body = await request.body()
     
     async with httpx.AsyncClient() as client:

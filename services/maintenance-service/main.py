@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# Add shared modules to path
+# Adiciona os módulos compartilhados ao caminho Python
 sys.path.append('/app/shared')
 
 from models import ServiceOrderStatus, AlertLevel, UserRole
@@ -23,31 +23,37 @@ from schemas import (
     ReportFilters, MaintenanceReportResponse
 )
 
+# Aplicação FastAPI - Serviço de Manutenção e Gestão de Ordens de Serviço
 app = FastAPI(
-    title="SADAE Maintenance Service",
-    description="Maintenance and public service management for SADAE",
+    title="SADAE Serviço de Manutenção",
+    description="Gestão de manutenção e atendimento de serviços públicos para SADAE",
     version="1.0.0"
 )
 
-# CORS middleware
+# Middleware CORS - Permite requisições de qualquer origem (desenvolvimento)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Em produção, especificar domínios permitidos
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database setup
-DATABASE_URL = get_database_url("maintenance")
-engine = create_database_engine(DATABASE_URL)
-SessionLocal = get_session_local(engine)
+# Configuração do Banco de Dados
+DATABASE_URL = get_database_url("maintenance")  # URL do banco específico para manutenção
+engine = create_database_engine(DATABASE_URL)  # Engine SQLAlchemy
+SessionLocal = get_session_local(engine)  # Factory de sessões
 
-# Create tables
+# Cria as tabelas no banco de dados se não existirem
 Base.metadata.create_all(bind=engine)
 
 def get_db_session():
-    """Get database session"""
+    """
+    Obtém uma sessão do banco de dados com gerenciamento automático de recursos
+    
+    Yields:
+        Session: Sessão SQLAlchemy para operações de banco de dados
+    """
     db = SessionLocal()
     try:
         yield db
@@ -55,7 +61,18 @@ def get_db_session():
         db.close()
 
 async def verify_user_token(authorization: str):
-    """Verify user token with auth service"""
+    """
+    Verifica o token do usuário com o serviço de autenticação
+    
+    Args:
+        authorization: Header Authorization com token JWT
+        
+    Returns:
+        dict: Dados do usuário autenticado
+        
+    Raises:
+        HTTPException: Se token inválido ou expirado
+    """
     try:
         response = await make_service_request(
             service_registry.get_service_url("auth"),
@@ -67,24 +84,39 @@ async def verify_user_token(authorization: str):
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail="Token inválido ou expirado"
         )
 
 @app.get("/")
 async def root():
-    return {"message": "SADAE Maintenance Service", "version": "1.0.0"}
+    """Endpoint raiz - Informações básicas do serviço de manutenção"""
+    return {"message": "SADAE Serviço de Manutenção", "version": "1.0.0"}
 
 @app.get("/health")
 async def health_check():
+    """Verificação de saúde do serviço - Status operacional"""
     return {"status": "healthy", "service": "maintenance"}
 
-# Service Order Management
+# Gestão de Ordens de Serviço
 async def get_auth_user(request: Request, db: Session = Depends(get_db_session)):
+    """
+    Obtém o usuário autenticado a partir do header Authorization
+    
+    Args:
+        request: Requisição HTTP com header Authorization
+        db: Sessão do banco de dados
+        
+    Returns:
+        dict: Dados do usuário autenticado
+        
+    Raises:
+        HTTPException: Se header Authorization ausente ou token inválido
+    """
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization header"
+            detail="Header Authorization ausente"
         )
     user = await verify_user_token(auth_header)
     return user
@@ -97,24 +129,46 @@ async def create_service_order(
     db: Session = Depends(get_db_session),
     user: dict = Depends(get_auth_user)
 ):
-    """Create service order (maintenance manager only)"""
-    if user["role"] != UserRole.MAINTENANCE_MANAGER:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    """
+    Cria uma nova ordem de serviço de manutenção
     
-    # Generate protocol number
+    Este endpoint permite que gestores de manutenção criem novas ordens de serviço
+    para solução de problemas reportados no sistema de abastecimento.
+    
+    Args:
+        request: Requisição HTTP
+        order_data: Dados da ordem de serviço (descrição, localização, prioridade)
+        background_tasks: Tarefas em background para notificações
+        db: Sessão do banco de dados
+        user: Usuário autenticado
+        
+    Returns:
+        ServiceOrderResponse: Ordem de serviço criada com protocolo gerado
+        
+    Raises:
+        HTTPException: Se usuário não for gestor de manutenção
+    """
+    if user["role"] != UserRole.MAINTENANCE_MANAGER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Apenas gestores de manutenção podem criar ordens de serviço"
+        )
+    
+    # Gera número de protocolo único para rastreamento
     protocol_number = generate_protocol_number()
     
+    # Cria a ordem de serviço com status inicial ABERTA
     service_order = ServiceOrder(
         **order_data.dict(),
         protocol_number=protocol_number,
         created_by=user["id"],
-        status=ServiceOrderStatus.OPEN
+        status=ServiceOrderStatus.OPEN  # Status inicial: Aberta
     )
     db.add(service_order)
     db.commit()
     db.refresh(service_order)
     
-    # Send notification to available teams
+    # Notifica equipes disponíveis sobre a nova ordem
     background_tasks.add_task(notify_available_teams, service_order)
     
     return service_order
@@ -130,9 +184,28 @@ async def get_service_orders(
     db: Session = Depends(get_db_session),
     user: dict = Depends(get_auth_user)
 ):
-    """Get service orders with filters"""
+    """
+    Obtém lista de ordens de serviço com filtros opcionais
+    
+    Este endpoint permite consultar ordens de serviço aplicando filtros por status,
+    prioridade e equipe responsável. Cidadãos só podem ver suas próprias ordens.
+    
+    Args:
+        request: Requisição HTTP
+        status: Filtro por status da ordem (opcional)
+        priority: Filtro por nível de prioridade (opcional)
+        assigned_team: Filtro por equipe responsável (opcional)
+        skip: Número de registros para pular (paginação)
+        limit: Número máximo de registros retornados
+        db: Sessão do banco de dados
+        user: Usuário autenticado
+        
+    Returns:
+        List[ServiceOrderResponse]: Lista de ordens de serviço filtradas
+    """
     query = db.query(ServiceOrder)
     
+    # Aplica filtros se fornecidos
     if status:
         query = query.filter(ServiceOrder.status == status)
     if priority:
@@ -140,7 +213,7 @@ async def get_service_orders(
     if assigned_team:
         query = query.filter(ServiceOrder.assigned_team == assigned_team)
     
-    # Citizens can only see their own orders
+    # Cidadãos só podem ver suas próprias ordens
     if user["role"] == UserRole.CITIZEN:
         query = query.filter(ServiceOrder.created_by == user["id"])
     

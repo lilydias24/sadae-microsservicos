@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# Add shared modules to path
+# Adiciona os módulos compartilhados ao caminho Python
 sys.path.append('/app/shared')
 
 from models import SensorType, AlertLevel, AnomalyStatus, UserRole
@@ -25,27 +25,28 @@ from schemas import (
 from anomaly_detector import AnomalyDetector
 from websocket_manager import ConnectionManager
 
+# Aplicação FastAPI - Serviço de Monitoramento de Sensores IoT
 app = FastAPI(
-    title="SADAE Monitoring Service",
-    description="Real-time monitoring and anomaly detection service for SADAE",
+    title="SADAE Serviço de Monitoramento",
+    description="Serviço de monitoramento em tempo real e detecção de anomalias para SADAE",
     version="1.0.0"
 )
 
-# CORS middleware
+# Middleware CORS - Permite requisições de qualquer origem (desenvolvimento)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Em produção, especificar domínios permitidos
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database setup
-DATABASE_URL = get_database_url("monitoring")
-engine = create_database_engine(DATABASE_URL)
-SessionLocal = get_session_local(engine)
+# Configuração do Banco de Dados
+DATABASE_URL = get_database_url("monitoring")  # URL do banco específico para monitoramento
+engine = create_database_engine(DATABASE_URL)  # Engine SQLAlchemy
+SessionLocal = get_session_local(engine)  # Factory de sessões
 
-# Create tables
+# Cria as tabelas no banco de dados se não existirem
 Base.metadata.create_all(bind=engine)
 
 # Redis setup for real-time data
