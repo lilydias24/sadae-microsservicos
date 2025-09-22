@@ -3,12 +3,36 @@
 import type React from "react"
 import { useAuth } from "../contexts/AuthContext"
 import { useWebSocket } from "../contexts/WebSocketContext"
+import { useQuery } from "@tanstack/react-query"
 import { Activity, AlertTriangle, Wrench, CreditCard, Users, Droplets } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts"
+import dataService from "../services/dataService"
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth()
   const { sensorData, alerts, isConnected } = useWebSocket()
+
+  // Financial data queries for financial_manager role
+  const { data: bills = [] } = useQuery({
+    queryKey: ["bills"],
+    queryFn: () => dataService.getBills(),
+    enabled: user?.role === "financial_manager",
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+
+  const { data: disputes = [] } = useQuery({
+    queryKey: ["disputes"],
+    queryFn: () => dataService.getBillDisputes(),
+    enabled: user?.role === "financial_manager",
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: negotiations = [] } = useQuery({
+    queryKey: ["negotiations"],
+    queryFn: () => dataService.getDebtNegotiations(),
+    enabled: user?.role === "financial_manager",
+    staleTime: 5 * 60 * 1000,
+  })
 
   // Mock data for charts
   const waterLevelData = sensorData
@@ -53,11 +77,21 @@ export const DashboardPage: React.FC = () => {
           { title: "Eficiência", value: "94%", icon: Activity, color: "bg-green-500" },
         ]
       case "financial_manager":
+        // Calculate real statistics from database
+        const totalBills = bills.length
+        const totalDisputes = disputes.length
+        const paidBills = bills.filter(bill => bill.status === "paid").length
+        const overdueBills = bills.filter(bill => bill.status === "overdue").length
+        const pendingBills = bills.filter(bill => bill.status === "pending").length
+        
+        const collectionRate = totalBills > 0 ? Math.round((paidBills / totalBills) * 100) : 0
+        const defaultRate = totalBills > 0 ? Math.round((overdueBills / totalBills) * 100) : 0
+        
         return [
-          { title: "Faturas Emitidas", value: "1,234", icon: CreditCard, color: "bg-blue-500" },
-          { title: "Contestações", value: "23", icon: AlertTriangle, color: "bg-yellow-500" },
-          { title: "Taxa de Cobrança", value: "96%", icon: CreditCard, color: "bg-green-500" },
-          { title: "Inadimplência", value: "4%", icon: AlertTriangle, color: "bg-red-500" },
+          { title: "Faturas Emitidas", value: totalBills.toString(), icon: CreditCard, color: "bg-blue-500" },
+          { title: "Contestações", value: totalDisputes.toString(), icon: AlertTriangle, color: "bg-yellow-500" },
+          { title: "Taxa de Cobrança", value: `${collectionRate}%`, icon: CreditCard, color: "bg-green-500" },
+          { title: "Inadimplência", value: `${defaultRate}%`, icon: AlertTriangle, color: defaultRate > 10 ? "bg-red-500" : "bg-orange-500" },
         ]
       case "crisis_manager":
         return [
@@ -138,6 +172,60 @@ export const DashboardPage: React.FC = () => {
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="pressure" fill="#10b981" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Charts - Only for financial_manager */}
+      {user?.role === "financial_manager" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Bill Status Distribution */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">Distribuição de Faturas</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={[
+                { status: "Pagas", count: bills.filter(b => b.status === "paid").length, fill: "#10b981" },
+                { status: "Pendentes", count: bills.filter(b => b.status === "pending").length, fill: "#f59e0b" },
+                { status: "Vencidas", count: bills.filter(b => b.status === "overdue").length, fill: "#ef4444" },
+                { status: "Contestadas", count: bills.filter(b => b.status === "contested").length, fill: "#8b5cf6" }
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="status" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="count" fill="#3b82f6" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Monthly Revenue Trend */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">Valor Total por Status</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={[
+                { 
+                  status: "Pagas", 
+                  value: bills.filter(b => b.status === "paid").reduce((sum, b) => sum + b.amount, 0),
+                  fill: "#10b981"
+                },
+                { 
+                  status: "Pendentes", 
+                  value: bills.filter(b => b.status === "pending").reduce((sum, b) => sum + b.amount, 0),
+                  fill: "#f59e0b"
+                },
+                { 
+                  status: "Vencidas", 
+                  value: bills.filter(b => b.status === "overdue").reduce((sum, b) => sum + b.amount, 0),
+                  fill: "#ef4444"
+                }
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="status" />
+                <YAxis />
+                <Tooltip formatter={(value) => [`R$ ${Number(value).toFixed(2)}`, 'Valor']} />
+                <Bar dataKey="value" fill="#3b82f6" />
               </BarChart>
             </ResponsiveContainer>
           </div>

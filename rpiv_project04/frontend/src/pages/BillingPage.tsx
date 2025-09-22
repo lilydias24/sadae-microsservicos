@@ -17,50 +17,35 @@ import {
 } from "../components/ui"
 import { formatCurrency, formatDate, getStatusColor, getStatusText } from "../utils/cn"
 import { BillListSkeleton, StatCardSkeleton } from "../components/billing/BillingSkeleton"
-import { mockBills, mockDisputes, mockNegotiations } from "../data/mockData"
-
-interface Bill {
-  id: string
-  customer_id: string
-  amount: number
-  consumption: number
-  due_date: string
-  status: "pending" | "paid" | "overdue"
-  created_at: string
-  period_start: string
-  period_end: string
-}
-
-interface Dispute {
-  id: string
-  bill_id: string
-  reason: string
-  status: "pending" | "approved" | "rejected"
-  created_at: string
-  response?: string
-}
-
-interface DebtNegotiation {
-  id: string
-  customer_id: string
-  total_debt: number
-  installments: number
-  monthly_amount: number
-  status: "proposed" | "active" | "completed"
-  created_at: string
-}
+import dataService, { type Bill, type BillDispute, type DebtNegotiation } from "../services/dataService"
 
 export function BillingPage() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<"bills" | "disputes" | "negotiations">("bills")
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
-  const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null)
+  const [selectedDispute, setSelectedDispute] = useState<BillDispute | null>(null)
   const [selectedNegotiation, setSelectedNegotiation] = useState<DebtNegotiation | null>(null)
   const [showDisputeForm, setShowDisputeForm] = useState(false)
   const [showBillDetails, setShowBillDetails] = useState(false)
   const [showDisputeDetails, setShowDisputeDetails] = useState(false)
   const [showNegotiationDetails, setShowNegotiationDetails] = useState(false)
   const [disputeReason, setDisputeReason] = useState("")
+  
+  // Novos modais melhorados
+  const [showResolveDispute, setShowResolveDispute] = useState(false)
+  const [showCreateNegotiation, setShowCreateNegotiation] = useState(false)
+  const [resolutionText, setResolutionText] = useState("")
+  const [resolutionType, setResolutionType] = useState<"approve" | "reject" | null>(null)
+  
+  // Estados para nova negociação
+  const [newNegotiation, setNewNegotiation] = useState({
+    customerId: "",
+    totalDebt: "",
+    installments: "",
+    discountPercentage: "",
+    interestRate: "",
+    description: ""
+  })
   
   // Filtros
   const [searchTerm, setSearchTerm] = useState("")
@@ -73,62 +58,29 @@ export function BillingPage() {
 
   const queryClient = useQueryClient()
 
-  // Use mock data for demonstration - set to false to use real API
-  const useMockData = true
-
-  // Mock data with simulated loading
-  const [isLoading, setIsLoading] = useState(true)
-  const [bills, setBills] = useState<{ data: Bill[] } | null>(null)
-  const [disputes, setDisputes] = useState<{ data: Dispute[] } | null>(null)
-  const [negotiations, setNegotiations] = useState<{ data: DebtNegotiation[] } | null>(null)
-
-  // Simulate API loading
-  useState(() => {
-    if (useMockData) {
-      setTimeout(() => {
-        setBills({ data: mockBills })
-        setDisputes({ data: mockDisputes })
-        setNegotiations({ data: mockNegotiations })
-        setIsLoading(false)
-      }, 1500) // Simulate loading time
-    }
-  })
-
-  // Real API queries (only used when useMockData is false)
-  const { data: realBills, isLoading: billsLoading } = useQuery({
+  // Data queries using dataService (handles mock/real data automatically)
+  const { data: bills = [], isLoading: billsLoading } = useQuery({
     queryKey: ["bills"],
-    queryFn: () => {
-      if (user?.role === "citizen") {
-        return api.get(`/billing/bills/customer/${user.user_id}`)
-      }
-      return api.get("/billing/bills")
-    },
-    enabled: !useMockData
+    queryFn: () => dataService.getBills(),
   })
 
-  const { data: realDisputes, isLoading: disputesLoading } = useQuery({
+  const { data: disputes = [], isLoading: disputesLoading } = useQuery({
     queryKey: ["disputes"],
-    queryFn: () => api.get("/billing/disputes"),
-    enabled: !useMockData
+    queryFn: () => dataService.getBillDisputes(),
   })
 
-  const { data: realNegotiations, isLoading: negotiationsLoading } = useQuery({
+  const { data: negotiations = [], isLoading: negotiationsLoading } = useQuery({
     queryKey: ["negotiations"],
-    queryFn: () => api.get("/billing/negotiations"),
-    enabled: !useMockData
+    queryFn: () => dataService.getDebtNegotiations(),
   })
 
-  // Use mock or real data
-  const finalBills = useMockData ? bills : realBills
-  const finalDisputes = useMockData ? disputes : realDisputes
-  const finalNegotiations = useMockData ? negotiations : realNegotiations
-  const finalLoading = useMockData ? isLoading : (billsLoading || disputesLoading || negotiationsLoading)
+  const isLoading = billsLoading || disputesLoading || negotiationsLoading
 
   // Memoized filtered and sorted bills
   const filteredBills = useMemo(() => {
-    if (!finalBills?.data) return []
+    if (!bills) return []
     
-    let filtered = finalBills.data.filter((bill: Bill) => {
+    let filtered = bills.filter((bill: Bill) => {
       const matchesSearch = bill.id.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = statusFilter === "all" || bill.status === statusFilter
       
@@ -195,14 +147,13 @@ export function BillingPage() {
     })
     
     return filtered
-  }, [finalBills?.data, searchTerm, statusFilter, sortBy, sortOrder, dateFilter, amountFilter])
+  }, [bills, searchTerm, statusFilter, sortBy, sortOrder, dateFilter, amountFilter])
 
   // Statistics
-  const stats = useMemo(() => {
-    if (!finalBills?.data) return { total: 0, pending: 0, overdue: 0, paid: 0, totalAmount: 0 }
-    
-    return finalBills.data.reduce((acc: any, bill: Bill) => {
-      acc.total++
+    const statistics = useMemo(() => {
+    if (!bills) return { total: 0, pending: 0, overdue: 0, paid: 0, totalAmount: 0 }
+
+    return bills.reduce((acc: any, bill: Bill) => {      acc.total++
       acc.totalAmount += bill.amount
       
       switch (bill.status) {
@@ -219,7 +170,7 @@ export function BillingPage() {
       
       return acc
     }, { total: 0, pending: 0, overdue: 0, paid: 0, totalAmount: 0 })
-  }, [finalBills?.data])
+  }, [bills])
     // Create dispute mutation
   const createDisputeMutation = useMutation({
     mutationFn: (disputeData: { bill_id: string; reason: string }) => api.post("/billing/disputes", disputeData),
@@ -239,7 +190,56 @@ export function BillingPage() {
     },
   })
 
-  if (finalLoading) {
+  // Resolve dispute mutation (approve/reject)
+  const resolveDisputeMutation = useMutation({
+    mutationFn: ({ disputeId, approved, resolution }: { disputeId: string, approved: boolean, resolution: string }) => 
+      api.put(`/billing/contests/${disputeId}/resolve?resolution=${encodeURIComponent(resolution)}&approved=${approved}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["disputes"] })
+      queryClient.invalidateQueries({ queryKey: ["bills"] })
+      setShowResolveDispute(false)
+      setResolutionText("")
+      setResolutionType(null)
+      setSelectedDispute(null)
+    },
+  })
+
+  // Create debt negotiation mutation
+  const createNegotiationMutation = useMutation({
+    mutationFn: (negotiationData: {
+      customer_id: number,
+      total_debt: number,
+      installments: number,
+      discount_percentage: number,
+      interest_rate: number,
+      description?: string
+    }) => api.post("/billing/debt-negotiations", negotiationData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["negotiations"] })
+      setShowCreateNegotiation(false)
+      setNewNegotiation({
+        customerId: "",
+        totalDebt: "",
+        installments: "",
+        discountPercentage: "",
+        interestRate: "",
+        description: ""
+      })
+    },
+  })
+
+  // Resolve negotiation mutation (approve/reject)
+  const resolveNegotiationMutation = useMutation({
+    mutationFn: ({ negotiationId, approved }: { negotiationId: string, approved: boolean }) => 
+      api.put(`/billing/debt-negotiations/${negotiationId}/resolve?approved=${approved}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["negotiations"] })
+      setShowNegotiationDetails(false)
+      setSelectedNegotiation(null)
+    },
+  })
+
+  if (isLoading) {
     return (
       <div className="space-y-8">
         {/* Header Skeleton */}
@@ -450,7 +450,7 @@ export function BillingPage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Total de Faturas</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+              <p className="text-2xl font-bold text-gray-900">{statistics.total}</p>
             </div>
           </div>
         </Card>
@@ -464,7 +464,7 @@ export function BillingPage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Pendentes</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.pending}</p>
+              <p className="text-2xl font-bold text-gray-900">{statistics.pending}</p>
             </div>
           </div>
         </Card>
@@ -478,7 +478,7 @@ export function BillingPage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Em Atraso</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.overdue}</p>
+              <p className="text-2xl font-bold text-gray-900">{statistics.overdue}</p>
             </div>
           </div>
         </Card>
@@ -492,7 +492,7 @@ export function BillingPage() {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Pagas</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.paid}</p>
+              <p className="text-2xl font-bold text-gray-900">{statistics.paid}</p>
             </div>
           </div>
         </Card>
@@ -503,9 +503,9 @@ export function BillingPage() {
         <Card padding="none">
           <nav className="flex space-x-8 px-6 py-4 border-b border-gray-100">
             {[
-              { id: "bills", name: "Faturas", icon: "📄", count: stats.total },
-              { id: "disputes", name: "Contestações", icon: "⚖️", count: finalDisputes?.data?.length || 0 },
-              { id: "negotiations", name: "Negociações", icon: "🤝", count: finalNegotiations?.data?.length || 0 },
+              { id: "bills", name: "Faturas", icon: "📄", count: statistics.total },
+              { id: "disputes", name: "Contestações", icon: "⚖️", count: disputes?.length || 0 },
+              { id: "negotiations", name: "Negociações", icon: "🤝", count: negotiations?.length || 0 },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -535,9 +535,9 @@ export function BillingPage() {
                   {user?.role === "citizen" ? "Suas Faturas" : "Todas as Faturas"}
                 </h3>
                 <p className="text-sm text-gray-600 mt-1">
-                  {filteredBills.length === finalBills?.data?.length 
+                  {filteredBills.length === bills?.length 
                     ? `${filteredBills.length} faturas encontradas`
-                    : `${filteredBills.length} de ${finalBills?.data?.length || 0} faturas (filtradas)`
+                    : `${filteredBills.length} de ${bills?.length || 0} faturas (filtradas)`
                   }
                 </p>
               </div>
@@ -681,11 +681,11 @@ export function BillingPage() {
           <CardHeader>
             <h3 className="text-lg font-semibold text-gray-900">Contestações de Faturas</h3>
             <p className="text-sm text-gray-600 mt-1">
-              {finalDisputes?.data?.length || 0} contestações registradas
+              {disputes?.length || 0} contestações registradas
             </p>
           </CardHeader>
           <CardContent>
-            {!finalDisputes?.data?.length ? (
+            {!disputes?.length ? (
               <div className="text-center py-12">
                 <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                   <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -697,7 +697,7 @@ export function BillingPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {finalDisputes.data.map((dispute: Dispute) => (
+                {disputes.map((dispute: BillDispute) => (
                   <div key={dispute.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -720,12 +720,28 @@ export function BillingPage() {
                           </div>
                         )}
                       </div>
-                      {dispute.status === "pending" && (
+                      {dispute.status === "pending" && user?.role !== "citizen" && (
                         <div className="flex items-center space-x-2 ml-4">
-                          <Button variant="success" size="sm">
+                          <Button 
+                            variant="success" 
+                            size="sm"
+                            onClick={() => {
+                              setSelectedDispute(dispute)
+                              setResolutionType("approve")
+                              setShowResolveDispute(true)
+                            }}
+                          >
                             Aprovar
                           </Button>
-                          <Button variant="danger" size="sm">
+                          <Button 
+                            variant="danger" 
+                            size="sm"
+                            onClick={() => {
+                              setSelectedDispute(dispute)
+                              setResolutionType("reject")
+                              setShowResolveDispute(true)
+                            }}
+                          >
                             Rejeitar
                           </Button>
                         </div>
@@ -753,13 +769,25 @@ export function BillingPage() {
       {activeTab === "negotiations" && user?.role !== "citizen" && (
         <Card>
           <CardHeader>
-            <h3 className="text-lg font-semibold text-gray-900">Negociações de Débito</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              {finalNegotiations?.data?.length || 0} negociações registradas
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Negociações de Débito</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {negotiations?.length || 0} negociações registradas
+                </p>
+              </div>
+              {user?.role !== "citizen" && (
+                <Button 
+                  onClick={() => setShowCreateNegotiation(true)}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  Nova Negociação
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            {!finalNegotiations?.data?.length ? (
+            {!negotiations?.length ? (
               <div className="text-center py-12">
                 <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                   <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -771,7 +799,7 @@ export function BillingPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {finalNegotiations.data.map((negotiation: DebtNegotiation) => (
+                {negotiations.map((negotiation: DebtNegotiation) => (
                   <div key={negotiation.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
@@ -1262,16 +1290,266 @@ export function BillingPage() {
             {/* Actions */}
             {selectedNegotiation.status === "proposed" && user?.role !== "citizen" && (
               <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <Button variant="success" className="flex-1">
+                <Button 
+                  variant="success" 
+                  className="flex-1"
+                  onClick={() => {
+                    resolveNegotiationMutation.mutate({
+                      negotiationId: selectedNegotiation.id,
+                      approved: true
+                    })
+                  }}
+                  isLoading={resolveNegotiationMutation.isPending}
+                >
                   ✅ Aprovar Negociação
                 </Button>
-                <Button variant="danger" className="flex-1">
+                <Button 
+                  variant="danger" 
+                  className="flex-1"
+                  onClick={() => {
+                    resolveNegotiationMutation.mutate({
+                      negotiationId: selectedNegotiation.id,
+                      approved: false
+                    })
+                  }}
+                  isLoading={resolveNegotiationMutation.isPending}
+                >
                   ❌ Rejeitar Negociação
                 </Button>
               </div>
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Modal para Resolver Contestação */}
+      <Modal 
+        isOpen={showResolveDispute} 
+        onClose={() => {
+          setShowResolveDispute(false)
+          setResolutionText("")
+          setResolutionType(null)
+          setSelectedDispute(null)
+        }}
+        title={`${resolutionType === "approve" ? "Aprovar" : "Rejeitar"} Contestação`}
+      >
+        {selectedDispute && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-gray-900 mb-2">Detalhes da Contestação</h4>
+              <p className="text-sm text-gray-600 mb-2">
+                <span className="font-medium">Protocolo:</span> #{selectedDispute.id.slice(-8)}
+              </p>
+              <p className="text-sm text-gray-600 mb-2">
+                <span className="font-medium">Motivo:</span> {selectedDispute.reason}
+              </p>
+              {selectedDispute.description && (
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Descrição:</span> {selectedDispute.description}
+                </p>
+              )}
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {resolutionType === "approve" ? "Motivo da Aprovação" : "Motivo da Rejeição"}
+              </label>
+              <textarea
+                value={resolutionText}
+                onChange={(e) => setResolutionText(e.target.value)}
+                placeholder={`Digite aqui o motivo da ${resolutionType === "approve" ? "aprovação" : "rejeição"}...`}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                rows={4}
+                required
+              />
+            </div>
+            
+            <div className="flex gap-3 pt-4 border-t border-gray-200">
+              <Button 
+                variant="ghost" 
+                className="flex-1"
+                onClick={() => {
+                  setShowResolveDispute(false)
+                  setResolutionText("")
+                  setResolutionType(null)
+                  setSelectedDispute(null)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button 
+                variant={resolutionType === "approve" ? "success" : "danger"}
+                className="flex-1"
+                onClick={() => {
+                  if (resolutionText.trim()) {
+                    resolveDisputeMutation.mutate({
+                      disputeId: selectedDispute.id,
+                      approved: resolutionType === "approve",
+                      resolution: resolutionText
+                    })
+                  }
+                }}
+                isLoading={resolveDisputeMutation.isPending}
+                disabled={!resolutionText.trim()}
+              >
+                {resolutionType === "approve" ? "Aprovar" : "Rejeitar"} Contestação
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal para Criar Nova Negociação */}
+      <Modal 
+        isOpen={showCreateNegotiation} 
+        onClose={() => {
+          setShowCreateNegotiation(false)
+          setNewNegotiation({
+            customerId: "",
+            totalDebt: "",
+            installments: "",
+            discountPercentage: "",
+            interestRate: "",
+            description: ""
+          })
+        }}
+        title="Nova Negociação de Débito"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                ID do Cliente
+              </label>
+              <Input
+                value={newNegotiation.customerId}
+                onChange={(e) => setNewNegotiation(prev => ({ ...prev, customerId: e.target.value }))}
+                placeholder="Digite o ID do cliente"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Valor Total da Dívida (R$)
+              </label>
+              <Input
+                type="number"
+                step="0.01"
+                value={newNegotiation.totalDebt}
+                onChange={(e) => setNewNegotiation(prev => ({ ...prev, totalDebt: e.target.value }))}
+                placeholder="0,00"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Número de Parcelas
+              </label>
+              <Input
+                type="number"
+                min="1"
+                value={newNegotiation.installments}
+                onChange={(e) => setNewNegotiation(prev => ({ ...prev, installments: e.target.value }))}
+                placeholder="Ex: 12"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Desconto (%)
+              </label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={newNegotiation.discountPercentage}
+                onChange={(e) => setNewNegotiation(prev => ({ ...prev, discountPercentage: e.target.value }))}
+                placeholder="0,00"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Taxa de Juros (% ao mês)
+              </label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={newNegotiation.interestRate}
+                onChange={(e) => setNewNegotiation(prev => ({ ...prev, interestRate: e.target.value }))}
+                placeholder="0,00"
+              />
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Observações (Opcional)
+            </label>
+            <textarea
+              value={newNegotiation.description}
+              onChange={(e) => setNewNegotiation(prev => ({ ...prev, description: e.target.value }))}
+              placeholder="Digite observações sobre a negociação..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              rows={3}
+            />
+          </div>
+          
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <h4 className="font-medium text-blue-900 mb-2">Resumo da Negociação</h4>
+            <div className="text-sm text-blue-800 space-y-1">
+              <p><span className="font-medium">Valor Original:</span> R$ {parseFloat(newNegotiation.totalDebt || "0").toFixed(2)}</p>
+              <p><span className="font-medium">Desconto:</span> {parseFloat(newNegotiation.discountPercentage || "0").toFixed(2)}%</p>
+              <p><span className="font-medium">Valor com Desconto:</span> R$ {(parseFloat(newNegotiation.totalDebt || "0") * (1 - parseFloat(newNegotiation.discountPercentage || "0") / 100)).toFixed(2)}</p>
+              <p><span className="font-medium">Parcelas:</span> {newNegotiation.installments || "0"}x</p>
+              <p><span className="font-medium">Valor por Parcela:</span> R$ {newNegotiation.installments ? ((parseFloat(newNegotiation.totalDebt || "0") * (1 - parseFloat(newNegotiation.discountPercentage || "0") / 100)) / parseInt(newNegotiation.installments)).toFixed(2) : "0,00"}</p>
+            </div>
+          </div>
+          
+          <div className="flex gap-3 pt-4 border-t border-gray-200">
+            <Button 
+              variant="ghost" 
+              className="flex-1"
+              onClick={() => {
+                setShowCreateNegotiation(false)
+                setNewNegotiation({
+                  customerId: "",
+                  totalDebt: "",
+                  installments: "",
+                  discountPercentage: "",
+                  interestRate: "",
+                  description: ""
+                })
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              onClick={() => {
+                if (newNegotiation.customerId && newNegotiation.totalDebt && newNegotiation.installments) {
+                  createNegotiationMutation.mutate({
+                    customer_id: parseInt(newNegotiation.customerId),
+                    total_debt: parseFloat(newNegotiation.totalDebt),
+                    installments: parseInt(newNegotiation.installments),
+                    discount_percentage: parseFloat(newNegotiation.discountPercentage || "0"),
+                    interest_rate: parseFloat(newNegotiation.interestRate || "0"),
+                    description: newNegotiation.description || undefined
+                  })
+                }
+              }}
+              isLoading={createNegotiationMutation.isPending}
+              disabled={!newNegotiation.customerId || !newNegotiation.totalDebt || !newNegotiation.installments}
+            >
+              Criar Negociação
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
