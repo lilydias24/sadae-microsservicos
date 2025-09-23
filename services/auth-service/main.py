@@ -3,10 +3,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
+import time
+from sqlalchemy.exc import OperationalError
 import sys
 import os
 
-# Add shared modules to path
+# Adiciona os módulos compartilhados ao caminho Python
 sys.path.append('/app/shared')
 
 from models import UserRole
@@ -16,47 +18,78 @@ from auth import verify_password, get_password_hash, create_access_token, verify
 from database_models import User, Base
 from schemas import UserCreate, UserLogin, UserResponse, Token, UserUpdate
 
+# Aplicação FastAPI - Serviço de Autenticação e Gestão de Usuários
 app = FastAPI(
-    title="SADAE Authentication Service",
-    description="Authentication and user management service for SADAE",
+    title="SADAE Serviço de Autenticação",
+    description="Serviço de autenticação e gerenciamento de usuários para SADAE",
     version="1.0.0"
 )
 
-# CORS middleware
+# Middleware CORS - Permite requisições de qualquer origem (desenvolvimento)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Em produção, especificar domínios permitidos
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database setup
-DATABASE_URL = get_database_url("auth")
-engine = create_database_engine(DATABASE_URL)
-SessionLocal = get_session_local(engine)
+# Configuração do Banco de Dados com retry até o banco ficar disponível
+DATABASE_URL = get_database_url("auth")  # URL do banco específico para autenticação
+engine = create_database_engine(DATABASE_URL)  # Engine SQLAlchemy
 
-# Create tables
+# Aguarda DB ficar acessível
+max_attempts = 20
+for attempt in range(1, max_attempts + 1):
+    try:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("SELECT 1")
+        break
+    except OperationalError:
+        time.sleep(1.5)
+else:
+    # Última tentativa fora do loop para propagar a exceção com clareza
+    with engine.connect() as conn:
+        conn.exec_driver_sql("SELECT 1")
+
+SessionLocal = get_session_local(engine)  # Factory de sessões
+
+# Cria as tabelas no banco de dados se não existirem
 Base.metadata.create_all(bind=engine)
 
-# Security setup
-security = HTTPBearer()
-
+# Esquema de segurança HTTP Bearer para JWT
 security = HTTPBearer()
 
 def get_db_session():
-    """Get database session"""
+    """
+    Obtém uma sessão do banco de dados com gerenciamento automático de recursos
+    
+    Yields:
+        Session: Sessão SQLAlchemy para operações de banco de dados
+    """
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close()
+        db.close()  # Garante que a conexão seja fechada
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
-    """Get current authenticated user"""
+    """
+    Obtém o usuário autenticado a partir do token JWT
+    
+    Args:
+        credentials: Credenciais HTTP Bearer com token JWT
+        db: Sessão do banco de dados
+        
+    Returns:
+        User: Usuário autenticado e ativo
+        
+    Raises:
+        HTTPException: Se token inválido, usuário não encontrado ou inativo
+    """
     token = credentials.credentials
     payload = verify_token(token)
     user_id = payload.get("sub")
@@ -65,56 +98,81 @@ def get_current_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            detail="Usuário não encontrado"
         )
     
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Inactive user"
+            detail="Usuário inativo"
         )
     
     return user
 
 def require_role(required_roles: list[UserRole]):
-    """Decorator to require specific user roles"""
+    """
+    Decorator para exigir roles específicos do usuário
+    
+    Args:
+        required_roles: Lista de roles permitidos para acessar o endpoint
+        
+    Returns:
+        function: Função de validação de role
+        
+    Raises:
+        HTTPException: Se usuário não possui role necessário
+    """
     def role_checker(current_user: User = Depends(get_current_user)):
         if current_user.role not in required_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions"
+                detail="Permissões insuficientes para esta operação"
             )
         return current_user
     return role_checker
 
 @app.get("/")
 async def root():
-    return {"message": "SADAE Authentication Service", "version": "1.0.0"}
+    """Endpoint raiz - Informações básicas do serviço de autenticação"""
+    return {"message": "SADAE Serviço de Autenticação", "version": "1.0.0"}
 
 @app.get("/health")
 async def health_check():
+    """Verificação de saúde do serviço - Status operacional"""
     return {"status": "healthy", "service": "auth"}
 
 @app.post("/register", response_model=UserResponse)
 async def register_user(user_data: UserCreate, db: Session = Depends(get_db_session)):
-    """Register a new user"""
+    """
+    Registra um novo usuário no sistema
     
-    # Check if user already exists
+    Args:
+        user_data: Dados do usuário (nome, email, senha, role)
+        db: Sessão do banco de dados
+        
+    Returns:
+        UserResponse: Dados do usuário criado (sem senha)
+        
+    Raises:
+        HTTPException: Se email já estiver em uso
+    """
+    
+    # Verifica se o usuário já existe
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="Email já está em uso"
         )
     
-    # Create new user
+    # Cria novo usuário com senha criptografada
     hashed_password = get_password_hash(user_data.password)
     db_user = User(
         email=user_data.email,
         name=user_data.name,
         hashed_password=hashed_password,
         role=user_data.role,
-        is_active=True
+        is_active=True  # Usuário ativo por padrão
     )
     
     db.add(db_user)
@@ -125,24 +183,33 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db_sess
 
 @app.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db_session)):
-    """Authenticate user and return JWT token"""
+    """
+    Autentica o usuário e retorna um token JWT
     
-    # Find user by email
-    user = db.query(User).filter(User.email == user_credentials.email).first()
-    
+    Args:
+        user_credentials: Credenciais de login (nome/email e senha)
+        db: Sessão do banco de dados
+        
+    Returns:
+        Token: Token JWT de acesso e dados do usuário
+        
+    Raises:
+        HTTPException: Se credenciais inválidas ou usuário inativo
+    """
+    # Busca usuário por nome
+    user = db.query(User).filter(User.name == user_credentials.name).first()
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Nome de usuário ou senha incorretos"
         )
-    
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Inactive user"
+            detail="Usuário inativo"
         )
     
-    # Create access token
+    # Cria token JWT com expiração de 24 horas
     access_token_expires = timedelta(hours=24)
     access_token = create_access_token(
         data={"sub": str(user.id), "email": user.email, "role": user.role},

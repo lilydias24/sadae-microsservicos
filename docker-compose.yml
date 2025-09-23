@@ -3,11 +3,9 @@ version: "3.8"
 services:
   # API Gateway
   api-gateway:
-    build:
-      context: ./services/api-gateway
-      dockerfile: Dockerfile
+    build: ./services/api-gateway
     ports:
-      - "8002:8000"
+      - "8000:8000"
       - "3002:3002" # Adicione esta porta para WebSocket
     environment:
       - SUPPORT_SERVICE_URL=http://support-service:8000

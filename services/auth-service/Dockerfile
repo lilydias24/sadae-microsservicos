@@ -7,9 +7,6 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared modules
-COPY shared/ /app/shared/
-
 # Copy service files
 COPY services/auth-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
