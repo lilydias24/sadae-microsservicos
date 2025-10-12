@@ -17,15 +17,22 @@ export const Header: React.FC = () => {
         <div className="flex items-center space-x-4">
           <h1 className="text-2xl font-bold text-slate-800">SADAE</h1>
           <div className="flex items-center space-x-2">
-            
-            <span className="text-sm text-slate-600">{isConnected ? "" : ""}</span>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
+            <span className="text-sm text-slate-600">{isConnected ? "Conectado" : "Desconectado"}</span>
           </div>
         </div>
 
         <div className="flex items-center space-x-4">
           {/* Notifications */}
           <div className="relative">
-            
+            <button className="p-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">
+              <Bell className="w-5 h-5" />
+              {unreadAlerts > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadAlerts > 9 ? "9+" : unreadAlerts}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* User menu */}

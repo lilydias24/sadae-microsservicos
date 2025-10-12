@@ -2,13 +2,16 @@
 Database models for Support Service
 """
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SQLEnum, Float
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 import enum
+import sys
+import os
 
-Base = declarative_base()
+# Adicionar o diretório shared ao path
+sys.path.append('/app/shared')
+from database import Base
 
 class TicketStatus(str, enum.Enum):
     OPEN = "open"

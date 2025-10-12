@@ -37,7 +37,7 @@ export const LoginPage: React.FC = () => {
 
     try {
       await login(username, password)
-      navigate("/maintenance")
+      navigate("/dashboard")
     } catch (err: any) {
       setError(err.response?.data?.detail || "Erro ao fazer login")
     } finally {
@@ -297,10 +297,15 @@ export const LoginPage: React.FC = () => {
             </form>
           )}
 
-          
+          {/* Footer */}
+          <div className="mt-8 text-center">
+            <div className="border-t border-slate-200 pt-4">
+              <Link to="/public" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                Acessar serviços públicos
+              </Link>
+            </div>
+          </div>
         </div>
-
-        
       </div>
     </div>
   )

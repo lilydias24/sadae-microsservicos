@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from decimal import Decimal
 import sys
 
@@ -105,7 +105,7 @@ class BillContestResponse(BillContestBase):
 class DebtNegotiationBase(BaseModel):
     customer_id: int
     installments: int
-    installment_amount: Decimal
+    installment_amount: float
     discount_percentage: float = 0.0
     interest_rate: float = 0.0
 

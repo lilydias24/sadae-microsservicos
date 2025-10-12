@@ -1,25 +1,17 @@
-# Sistema auxiliar de departamento de agua e esgoto — Sadae System
+# 🌊 Sistema SADAE - Sistema de Água e Esgoto
 
-## O que foi implementado até agora
+> Sistema completo de gerenciamento de faturamento e serviços de água e esgoto com interface moderna e responsiva.
 
-- **Tela de Gestão de Manutenção** com três abas principais:
-  - **Ordens de Serviço**: Visualização de ordens, prioridade, status, localização, duração estimada e data de criação.
-  - **Equipes**: Listagem de equipes, status (disponível/ocupado) e quantidade de membros.
-  - **Reclamações**: Visualização de reclamações dos cidadãos, status, localização e data.
-- **Botão "Nova Ordem de Serviço"**: Abre um modal para cadastro de uma nova ordem, com formulário para título, descrição, prioridade, localização e duração estimada.
-- **Atribuição de Equipe**: Modal para selecionar e atribuir uma equipe disponível a uma ordem de serviço aberta.
-- **Componentização e uso de React Hooks** para controle de estado e ações.
-- **Estilização responsiva** com classes utilitárias (provavelmente TailwindCSS).
+## 🎯 Sobre o Projeto
 
-## Próximas implementações
+O Sistema SADAE é uma aplicação web full-stack desenvolvida para gerenciar serviços de água e esgoto, incluindo faturamento, contestações, negociações e controle administrativo. O projeto foi completamente modernizado com uma interface responsiva e componentes reutilizáveis.
 
-
-- **Validação avançada de formulários** (ex: campos obrigatórios, limites de caracteres, máscaras de entrada).
-- **Feedback visual** após criação/atribuição de ordens (ex: toasts de sucesso/erro).
-- **Filtros e busca** nas listas de ordens, equipes e reclamações.
-- **Paginação ou scroll infinito** para grandes volumes de dados.
-- **Edição e exclusão de ordens de serviço** diretamente pela interface.
-- **Dashboard com indicadores** (KPIs) de manutenção.
-
-
----
+### ✨ Status Atual
+- ✅ Frontend modernizado com design responsivo
+- ✅ Sistema de componentes reutilizáveis
+- ✅ Filtros avançados e busca em tempo real
+- ✅ Modais funcionais para detalhes, contestações e negociações
+- ✅ Estados de carregamento com skeleton
+- ✅ Validações e tratamento de erros
+- 🔄 Backend em desenvolvimento
+- 🔄 Integração com API real (usando mock data)

@@ -6,19 +6,19 @@ import { LayoutDashboard, Activity, Wrench, CreditCard, AlertTriangle, MessageSq
 import { useAuth } from "../contexts/AuthContext"
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["crisis_manager"] },
-  { name: "Monitoramento", href: "/monitoring", icon: Activity, roles: ["crisis_manager"] },
-  { name: "Manutenção", href: "/maintenance", icon: Wrench, roles: ["operator"] },
-  { name: "Faturamento", href: "/billing", icon: CreditCard, roles: ["crisis_manager"] },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["all"] },
+  { name: "Monitoramento", href: "/monitoring", icon: Activity, roles: ["operator", "crisis_manager"] },
+  { name: "Manutenção", href: "/maintenance", icon: Wrench, roles: ["maintenance_manager", "operator"] },
+  { name: "Faturamento", href: "/billing", icon: CreditCard, roles: ["all"] },
   { name: "Gestão de Crises", href: "/crisis", icon: AlertTriangle, roles: ["crisis_manager"] },
-  { name: "Atendimento", href: "/support", icon: MessageSquare, roles: ["crisis_manager"] },
+  { name: "Atendimento", href: "/support", icon: MessageSquare, roles: ["all"] },
   {
     name: "Relatórios",
     href: "/reports",
     icon: FileText,
-    roles: [ "crisis_manager"],
+    roles: ["operator", "maintenance_manager", "financial_manager", "crisis_manager"],
   },
-  { name: "Perfil", href: "/profile", icon: User, roles: ["crisis_manager"] },
+  { name: "Perfil", href: "/profile", icon: User, roles: ["all"] },
 ]
 
 export const Sidebar: React.FC = () => {

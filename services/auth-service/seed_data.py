@@ -25,29 +25,12 @@ def create_initial_users():
     db = SessionLocal()
     
     try:
-        # Limpa todos os usuários existentes
-        db.query(User).delete()
-        db.commit()
-
-        # Garante que o usuário Operator sempre existe
-        operator_data = {
-            "email": "operator@sadae.com",
-            "name": "Operator",
-            "password": "123",
-            "role": UserRole.OPERATOR
-        }
-        hashed_password = get_password_hash(operator_data["password"])
-        user = User(
-            email=operator_data["email"],
-            name=operator_data["name"],
-            hashed_password=hashed_password,
-            role=operator_data["role"],
-            is_active=True
-        )
-        db.add(user)
-        print("Operator user created.")
-
-        # Demais usuários
+        # Check if users already exist
+        if db.query(User).count() > 0:
+            print("Users already exist, skipping seed data creation")
+            return
+        
+        # Create initial users
         users_data = [
             {
                 "email": "operador@sadae.com",
@@ -60,6 +43,12 @@ def create_initial_users():
                 "name": "Maria Cidadã",
                 "password": "cidadao123",
                 "role": UserRole.CITIZEN
+            },
+            {
+                "email": "suporte@sadae.com",
+                "name": "Ana Agente de Suporte",
+                "password": "suporte123",
+                "role": UserRole.SUPPORT_AGENT
             },
             {
                 "email": "gestor.crise@sadae.com",
@@ -80,6 +69,7 @@ def create_initial_users():
                 "role": UserRole.FINANCIAL_MANAGER
             }
         ]
+        
         for user_data in users_data:
             hashed_password = get_password_hash(user_data["password"])
             user = User(
@@ -90,16 +80,17 @@ def create_initial_users():
                 is_active=True
             )
             db.add(user)
+        
         db.commit()
-        print(f"Operator e demais usuários criados.")
+        print(f"Created {len(users_data)} initial users")
+        
         # Print login credentials
         print("\n=== LOGIN CREDENTIALS ===")
-        print(f"Role: {operator_data['role']}")
-        print(f"Name: {operator_data['name']}")
-        print(f"Password: {operator_data['password']}")
-        print("---")
         for user_data in users_data:
-            print(f"Role: {user_data['role']}\nName: {user_data['name']}\nPassword: {user_data['password']}\n---")
+            print(f"Role: {user_data['role']}")
+            print(f"Email: {user_data['email']}")
+            print(f"Password: {user_data['password']}")
+            print("---")
             
     except Exception as e:
         print(f"Error creating initial users: {e}")

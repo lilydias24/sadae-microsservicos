@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# Adiciona os módulos compartilhados ao caminho Python
+# Add shared modules to path
 sys.path.append('/app/shared')
 
 from models import SensorType, AlertLevel, AnomalyStatus, UserRole
@@ -24,29 +24,29 @@ from schemas import (
 )
 from anomaly_detector import AnomalyDetector
 from websocket_manager import ConnectionManager
+from pydantic import BaseModel
 
-# Aplicação FastAPI - Serviço de Monitoramento de Sensores IoT
 app = FastAPI(
-    title="SADAE Serviço de Monitoramento",
-    description="Serviço de monitoramento em tempo real e detecção de anomalias para SADAE",
+    title="SADAE Monitoring Service",
+    description="Real-time monitoring and anomaly detection service for SADAE",
     version="1.0.0"
 )
 
-# Middleware CORS - Permite requisições de qualquer origem (desenvolvimento)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especificar domínios permitidos
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configuração do Banco de Dados
-DATABASE_URL = get_database_url("monitoring")  # URL do banco específico para monitoramento
-engine = create_database_engine(DATABASE_URL)  # Engine SQLAlchemy
-SessionLocal = get_session_local(engine)  # Factory de sessões
+# Database setup
+DATABASE_URL = os.getenv("DATABASE_URL_MONITORING", get_database_url("monitoring"))
+engine = create_database_engine(DATABASE_URL)
+SessionLocal = get_session_local(engine)
 
-# Cria as tabelas no banco de dados se não existirem
+# Create tables
 Base.metadata.create_all(bind=engine)
 
 # Redis setup for real-time data
@@ -66,8 +66,16 @@ def get_db_session():
     finally:
         db.close()
 
+def get_authorization_header(request: Request) -> str | None:
+    """Extract Authorization header (or None)."""
+    return request.headers.get("Authorization")
+
 async def verify_user_token(authorization: str):
-    """Verify user token with auth service"""
+    """Verify user token with auth service or bypass in dev."""
+    # Dev bypass: allows running monitoring-service standalone
+    if os.getenv("DEV_NO_AUTH", "true").lower() == "true":
+        return {"id": 1, "role": UserRole.OPERATOR, "name": "Dev User"}
+
     try:
         response = await make_service_request(
             service_registry.get_service_url("auth"),
@@ -90,11 +98,34 @@ async def root():
 async def health_check():
     return {"status": "healthy", "service": "monitoring"}
 
+# Admin: Detector endpoints
+class ThresholdUpdate(BaseModel):
+    sensor_type: SensorType
+    min: float
+    max: float
+
+@app.get("/detector/thresholds")
+async def get_detector_thresholds(sensor_type: SensorType):
+    """Get current thresholds for a sensor type"""
+    return anomaly_detector.get_thresholds(sensor_type)
+
+@app.put("/detector/thresholds")
+async def update_detector_thresholds(payload: ThresholdUpdate):
+    """Update min/max thresholds for a sensor type"""
+    await anomaly_detector.update_thresholds("_any", payload.sensor_type, payload.min, payload.max)
+    return {"ok": True, "thresholds": anomaly_detector.get_thresholds(payload.sensor_type)}
+
+@app.post("/detector/cache/reset")
+async def reset_detector_cache():
+    """Reset anomaly detector historical cache"""
+    anomaly_detector.reset_cache()
+    return {"ok": True}
+
 # Sensor Management
 @app.post("/sensors", response_model=SensorResponse)
 async def create_sensor(
     sensor_data: SensorCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Create a new sensor (operator only)"""
@@ -114,7 +145,7 @@ async def get_sensors(
     sensor_type: Optional[SensorType] = None,
     location: Optional[str] = None,
     active_only: bool = True,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Get all sensors"""
@@ -135,7 +166,7 @@ async def get_sensors(
 @app.get("/sensors/{sensor_id}", response_model=SensorResponse)
 async def get_sensor(
     sensor_id: str,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Get sensor by ID"""
@@ -152,7 +183,7 @@ async def get_sensor(
 async def get_realtime_readings(
     sensor_type: Optional[SensorType] = None,
     location: Optional[str] = None,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization"))
+    authorization: str | None = Depends(get_authorization_header)
 ):
     """Get real-time sensor readings from Redis cache"""
     await verify_user_token(authorization)
@@ -226,7 +257,7 @@ async def get_readings_history(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     limit: int = 1000,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Get historical sensor readings"""
@@ -254,7 +285,7 @@ async def get_anomalies(
     sensor_type: Optional[SensorType] = None,
     skip: int = 0,
     limit: int = 100,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Get anomalies with filters"""
@@ -276,7 +307,7 @@ async def get_anomalies(
 async def create_anomaly(
     anomaly_data: AnomalyCreate,
     background_tasks: BackgroundTasks,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Create anomaly alert (operator only)"""
@@ -314,7 +345,7 @@ async def create_anomaly(
 async def update_anomaly_status(
     anomaly_id: int,
     new_status: AnomalyStatus,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Update anomaly status"""
@@ -336,7 +367,7 @@ async def update_anomaly_status(
 @app.post("/observations", response_model=ObservationResponse)
 async def create_observation(
     observation_data: ObservationCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Create observation (operator only)"""
@@ -359,7 +390,7 @@ async def get_observations(
     sensor_id: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    authorization: str | None = Depends(get_authorization_header),
     db: Session = Depends(get_db_session)
 ):
     """Get observations"""
@@ -372,7 +403,7 @@ async def get_observations(
     if start_date:
         query = query.filter(Observation.timestamp >= start_date)
     if end_date:
-        query = query.filter(Observation.timestamp <= end_date)
+        query = query.filter(Observation.timestamp >= end_date)
     
     observations = query.order_by(Observation.timestamp.desc()).all()
     return {"observations": observations}

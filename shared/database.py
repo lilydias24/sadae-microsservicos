@@ -3,6 +3,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
+# Create the declarative base for all models
+Base = declarative_base()
+
 def get_database_url(service_name: str) -> str:
     """Get database URL from environment variables"""
     return os.getenv("DATABASE_URL", f"postgresql://user:password@localhost:5432/{service_name}_db")

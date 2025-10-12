@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -13,6 +13,7 @@ sys.path.append('/app/shared')
 from models import BillStatus, UserRole
 from database import get_database_url, create_database_engine, get_session_local
 from utils import generate_protocol_number, make_service_request, service_registry
+from auth import verify_token
 
 from database_models import (
     Customer, WaterMeter, MeterReading, Bill, BillContest, 
@@ -64,15 +65,22 @@ def get_db_session():
         db.close()
 
 async def verify_user_token(authorization: str):
-    """Verify user token with auth service"""
+    """Verify user token locally"""
     try:
-        response = await make_service_request(
-            service_registry.get_service_url("auth"),
-            "/verify-token",
-            method="POST",
-            headers={"Authorization": authorization}
-        )
-        return response["user"]
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        payload = verify_token(token)
+        
+        return {
+            "id": payload.get("sub"),
+            "email": payload.get("email"),
+            "role": payload.get("role")
+        }
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -87,14 +95,57 @@ async def root():
 async def health_check():
     return {"status": "healthy", "service": "billing"}
 
+# Test endpoint (temporary - no auth required)
+@app.get("/test-data")
+async def get_test_data(db: Session = Depends(get_db_session)):
+    """Get test data without authentication (temporary endpoint)"""
+    bills = db.query(Bill).limit(5).all()
+    customers = db.query(Customer).limit(3).all()
+    contests = db.query(BillContest).limit(3).all()
+    
+    return {
+        "bills": [
+            {
+                "id": bill.id,
+                "customer_id": bill.customer_id,
+                "amount": float(bill.amount),
+                "consumption": bill.consumption,
+                "due_date": bill.due_date.isoformat(),
+                "status": bill.status,
+                "created_at": bill.created_at.isoformat(),
+                "billing_period_start": bill.billing_period_start.isoformat(),
+                "billing_period_end": bill.billing_period_end.isoformat()
+            } for bill in bills
+        ],
+        "customers": [
+            {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "customer_type": customer.customer_type
+            } for customer in customers
+        ],
+        "contests": [
+            {
+                "id": contest.id,
+                "bill_id": contest.bill_id,
+                "protocol_number": contest.protocol_number,
+                "reason": contest.reason,
+                "status": contest.status,
+                "created_at": contest.created_at.isoformat()
+            } for contest in contests
+        ]
+    }
+
 # Customer Management
 @app.post("/customers", response_model=CustomerResponse)
 async def create_customer(
     customer_data: CustomerCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    req: Request,
     db: Session = Depends(get_db_session)
 ):
     """Create customer (financial manager only)"""
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -149,10 +200,11 @@ async def get_customer(
 @app.post("/meters", response_model=WaterMeterResponse)
 async def create_water_meter(
     meter_data: WaterMeterCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    req: Request,
     db: Session = Depends(get_db_session)
 ):
     """Create water meter (financial manager only)"""
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -279,14 +331,15 @@ async def get_meter_readings(
 # Bill Management
 @app.get("/bills", response_model=List[BillResponse])
 async def get_bills(
+    request: Request,
     customer_id: Optional[int] = None,
     status: Optional[BillStatus] = None,
     skip: int = 0,
     limit: int = 100,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db_session)
 ):
     """Get bills"""
+    authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     query = db.query(Bill)
@@ -332,10 +385,11 @@ async def get_bill(
 async def generate_bills(
     month: int,
     year: int,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    req: Request,
     db: Session = Depends(get_db_session)
 ):
     """Generate bills for all customers (financial manager only)"""
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -357,10 +411,11 @@ async def generate_bills(
 @app.post("/contests", response_model=BillContestResponse)
 async def create_bill_contest(
     contest_data: BillContestCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    req: Request,
     db: Session = Depends(get_db_session)
 ):
     """Contest a bill (citizen only)"""
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     # Verify bill exists and belongs to user
@@ -397,13 +452,14 @@ async def create_bill_contest(
 
 @app.get("/contests", response_model=List[BillContestResponse])
 async def get_bill_contests(
+    request: Request,
     status: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db_session)
 ):
     """Get bill contests"""
+    authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     query = db.query(BillContest)
@@ -428,83 +484,149 @@ async def resolve_bill_contest(
     contest_id: int,
     resolution: str,
     approved: bool,
+    req: Request,
     new_amount: Optional[float] = None,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db_session)
 ):
     """Resolve bill contest (financial manager only)"""
+    print(f"🔍 Resolving contest - ID: {contest_id}, Type: {type(contest_id)}, Resolution: {resolution}, Approved: {approved}")
+    
+    try:
+        authorization = req.headers.get("Authorization")
+        user = await verify_user_token(authorization)
+        print(f"🔍 User verified: {user}")
+        if user["role"] != UserRole.FINANCIAL_MANAGER:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        
+        contest = db.query(BillContest).filter(BillContest.id == contest_id).first()
+        print(f"🔍 Contest found: {contest}")
+        if not contest:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contest not found")
+        
+        bill = db.query(Bill).filter(Bill.id == contest.bill_id).first()
+        print(f"🔍 Bill found: {bill}")
+        
+        contest.status = "approved" if approved else "rejected"
+        contest.resolution = resolution
+        contest.resolved_at = datetime.utcnow()
+        contest.resolved_by = user["id"]
+        
+        if approved and new_amount is not None:
+            bill.amount = Decimal(str(new_amount))
+            bill.status = BillStatus.PENDING
+        else:
+            bill.status = BillStatus.PENDING
+        
+        db.commit()
+        print(f"🔍 Contest resolved successfully")
+        
+        return {"message": "Contest resolved successfully"}
+    except Exception as e:
+        print(f"❌ Error resolving contest: {e}")
+        raise
+
+@app.put("/debt-negotiations/{negotiation_id}/resolve")
+async def resolve_debt_negotiation(
+    negotiation_id: str,
+    approved: bool,
+    request: Request,
+    db: Session = Depends(get_db_session)
+):
+    """Resolve debt negotiation (financial manager only)"""
+    authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
-    contest = db.query(BillContest).filter(BillContest.id == contest_id).first()
-    if not contest:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contest not found")
+    # Try to find by string ID first, then by integer ID
+    negotiation = db.query(DebtNegotiation).filter(DebtNegotiation.id == negotiation_id).first()
+    if not negotiation:
+        # Try to convert to int if it's a numeric string
+        try:
+            int_id = int(negotiation_id)
+            negotiation = db.query(DebtNegotiation).filter(DebtNegotiation.id == int_id).first()
+        except ValueError:
+            pass
     
-    bill = db.query(Bill).filter(Bill.id == contest.bill_id).first()
+    if not negotiation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Negotiation not found")
     
-    contest.status = "approved" if approved else "rejected"
-    contest.resolution = resolution
-    contest.resolved_at = datetime.utcnow()
-    contest.resolved_by = user["id"]
+    if negotiation.status != "proposed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Negotiation is not in proposed status")
     
-    if approved and new_amount is not None:
-        bill.amount = Decimal(str(new_amount))
-        bill.status = BillStatus.PENDING
-    else:
-        bill.status = BillStatus.PENDING
+    negotiation.status = "active" if approved else "cancelled"
+    if approved:
+        negotiation.start_date = datetime.utcnow()
     
     db.commit()
     
-    return {"message": "Contest resolved successfully"}
+    return {"message": "Negotiation resolved successfully"}
 
 # Debt Negotiation
 @app.post("/negotiations", response_model=DebtNegotiationResponse)
 async def create_debt_negotiation(
     negotiation_data: DebtNegotiationCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    authorization: str = Depends(lambda request: request.headers.get("Authorization"))
 ):
     """Create debt negotiation (financial manager only)"""
-    user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    print(f"🔍 Creating negotiation - Data: {negotiation_data}")
     
-    # Check if customer has active negotiation
-    existing = db.query(DebtNegotiation).filter(
-        DebtNegotiation.customer_id == negotiation_data.customer_id,
-        DebtNegotiation.status == "active"
-    ).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer already has active negotiation")
-    
-    # Calculate negotiation terms
-    overdue_bills = db.query(Bill).filter(
-        Bill.customer_id == negotiation_data.customer_id,
-        Bill.status == BillStatus.OVERDUE
-    ).all()
-    
-    total_debt = sum(bill.amount for bill in overdue_bills)
-    
-    negotiation = DebtNegotiation(
-        **negotiation_data.dict(),
-        total_debt=total_debt,
-        status="proposed"
-    )
-    db.add(negotiation)
-    db.commit()
-    db.refresh(negotiation)
-    
-    return negotiation
+    try:
+        user = await verify_user_token(authorization)
+        print(f"🔍 User verified: {user}")
+        if user["role"] != UserRole.FINANCIAL_MANAGER:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        
+        # Check if customer has active negotiation
+        existing = db.query(DebtNegotiation).filter(
+            DebtNegotiation.customer_id == negotiation_data.customer_id,
+            DebtNegotiation.status == "active"
+        ).first()
+        print(f"🔍 Existing negotiation: {existing}")
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer already has active negotiation")
+        
+        # Calculate negotiation terms
+        overdue_bills = db.query(Bill).filter(
+            Bill.customer_id == negotiation_data.customer_id,
+            Bill.status == BillStatus.OVERDUE
+        ).all()
+        print(f"🔍 Found overdue bills: {len(overdue_bills)}")
+        
+        total_debt = sum(bill.amount for bill in overdue_bills)
+        print(f"🔍 Total debt calculated: {total_debt}")
+        
+        negotiation = DebtNegotiation(
+            customer_id=negotiation_data.customer_id,
+            installments=negotiation_data.installments,
+            installment_amount=Decimal(str(negotiation_data.installment_amount)),
+            discount_percentage=negotiation_data.discount_percentage,
+            interest_rate=negotiation_data.interest_rate,
+            total_debt=total_debt,
+            status="proposed"
+        )
+        print(f"🔍 Created negotiation object: {negotiation}")
+        db.add(negotiation)
+        db.commit()
+        db.refresh(negotiation)
+        
+        print(f"🔍 Negotiation saved successfully")
+        return negotiation
+    except Exception as e:
+        print(f"❌ Error creating negotiation: {e}")
+        print(f"❌ Error type: {type(e)}")
+        raise
 
-@app.get("/negotiations")
+@app.get("/negotiations", response_model=List[DebtNegotiationResponse])
 async def get_debt_negotiations(
+    request: Request,
     customer_id: Optional[int] = None,
     status: Optional[str] = None,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db_session)
 ):
     """Get debt negotiations"""
+    authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     query = db.query(DebtNegotiation)
@@ -518,22 +640,23 @@ async def get_debt_negotiations(
         if customer:
             query = query.filter(DebtNegotiation.customer_id == customer.id)
         else:
-            return {"negotiations": []}
+            return []
     elif customer_id:
         query = query.filter(DebtNegotiation.customer_id == customer_id)
     
     negotiations = query.order_by(DebtNegotiation.created_at.desc()).all()
-    return {"negotiations": negotiations}
+    return negotiations
 
 # Payment Processing
 @app.post("/payments", response_model=PaymentResponse)
 async def process_payment(
+    request: Request,
     payment_data: PaymentCreate,
     background_tasks: BackgroundTasks,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db_session)
 ):
     """Process payment"""
+    authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     # Verify bill exists
@@ -566,10 +689,11 @@ async def process_payment(
 @app.post("/tariffs", response_model=TariffRateResponse)
 async def create_tariff_rate(
     tariff_data: TariffRateCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    req: Request,
     db: Session = Depends(get_db_session)
 ):
     """Create tariff rate (financial manager only)"""
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -626,6 +750,45 @@ async def send_payment_confirmation(payment: Payment, bill: Bill):
         )
     except Exception as e:
         print(f"Error sending payment confirmation: {e}")
+
+# Test endpoint with DebtNegotiationCreate
+@app.post("/test-debt-nego", response_model=DebtNegotiationResponse)
+async def test_debt_negotiation(
+    negotiation_data: DebtNegotiationCreate,
+    req: Request,
+    db: Session = Depends(get_db_session)
+):
+    """Test endpoint for debt negotiation"""
+    authorization = req.headers.get("Authorization")
+    user = await verify_user_token(authorization)
+    if user["role"] != UserRole.FINANCIAL_MANAGER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    
+    # Simple creation without business logic
+    negotiation = DebtNegotiation(
+        customer_id=negotiation_data.customer_id,
+        installments=negotiation_data.installments,
+        installment_amount=negotiation_data.installment_amount,
+        discount_percentage=negotiation_data.discount_percentage,
+        interest_rate=negotiation_data.interest_rate,
+        total_debt=100.00,  # Fixed value for test
+        status="proposed"
+    )
+    db.add(negotiation)
+    db.commit()
+    db.refresh(negotiation)
+    return negotiation
+
+# Simple test endpoint for debugging
+@app.post("/test-simple")
+async def test_simple(
+    data: dict,
+    req: Request,
+    db: Session = Depends(get_db_session)
+):
+    """Simple test endpoint"""
+    authorization = req.headers.get("Authorization")
+    return {"status": "success", "received": data}
 
 if __name__ == "__main__":
     import uvicorn

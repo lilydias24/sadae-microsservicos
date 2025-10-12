@@ -57,7 +57,7 @@ from schemas import (
 )
 
 # Database setup
-DATABASE_URL = os.getenv("SUPPORT_DATABASE_URL", "postgresql://sadae_user:sadae_password_2024@postgres:5432/support_db")
+DATABASE_URL = os.getenv("SUPPORT_DATABASE_URL", "postgresql://support_user:support_pass@support-db:5432/support_db")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -134,11 +134,11 @@ async def health_check():
 @app.post("/tickets", response_model=TicketResponse)
 async def create_ticket(
     ticket_data: TicketCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Create new support ticket"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = Ticket(
         ticket_number=generate_ticket_number(),
@@ -180,11 +180,11 @@ async def get_tickets(
     assigned_agent_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Get tickets with filters"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     query = db.query(Ticket)
     
@@ -211,11 +211,11 @@ async def get_tickets(
 @app.get("/tickets/{ticket_id}", response_model=TicketResponse)
 async def get_ticket(
     ticket_id: int,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Get ticket by ID"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -231,11 +231,11 @@ async def get_ticket(
 async def update_ticket(
     ticket_id: int,
     ticket_data: TicketUpdate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Update ticket"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -271,11 +271,11 @@ async def update_ticket(
 async def assign_ticket(
     ticket_id: int,
     assign_data: TicketAssign,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Assign ticket to agent"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only operators and managers can assign tickets
     if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
@@ -313,11 +313,11 @@ async def assign_ticket(
 async def close_ticket(
     ticket_id: int,
     close_data: TicketClose,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Close ticket with resolution"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -353,11 +353,11 @@ async def close_ticket(
 async def rate_ticket(
     ticket_id: int,
     satisfaction_data: TicketSatisfaction,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Rate ticket satisfaction"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -384,11 +384,11 @@ async def rate_ticket(
 async def get_ticket_messages(
     ticket_id: int,
     include_internal: bool = False,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Get ticket messages"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -411,11 +411,11 @@ async def get_ticket_messages(
 async def create_ticket_message(
     ticket_id: int,
     message_data: MessageCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Add message to ticket"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -512,11 +512,11 @@ async def get_knowledge_article(
 @app.post("/knowledge-base", response_model=KnowledgeBaseResponse)
 async def create_knowledge_article(
     article_data: KnowledgeBaseCreate,
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Create knowledge base article"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only operators and managers can create articles
     if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
@@ -567,11 +567,11 @@ async def rate_knowledge_article(
 
 @app.get("/dashboard", response_model=DashboardMetrics)
 async def get_dashboard_metrics(
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Get dashboard metrics"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only support agents, operators and managers can see dashboard
     if user["role"] not in [UserRole.SUPPORT_AGENT, UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
@@ -635,11 +635,11 @@ async def get_dashboard_metrics(
 
 @app.get("/agent-dashboard")
 async def get_agent_dashboard_metrics(
-    authorization: str = Depends(lambda request: request.headers.get("Authorization")),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db_session)
 ):
     """Get dashboard metrics specifically for support agents"""
-    user = await verify_user_token(authorization)
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only support agents can access this endpoint
     if user["role"] != UserRole.SUPPORT_AGENT:

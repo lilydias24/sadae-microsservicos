@@ -1,8 +1,17 @@
 import axios from "axios"
 
+// Resolve API base URL from environment (for Docker) or fallback to localhost (dev)
+const resolvedBaseURL =
+  (typeof process !== "undefined" && (process as any).env?.REACT_APP_API_URL) ||
+  (typeof window !== "undefined" && (window as any).__RUNTIME_CONFIG__?.API_URL) ||
+  "http://localhost:8000"
+
 export const api = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: resolvedBaseURL,
   timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
 })
 
 // Request interceptor
@@ -59,21 +68,27 @@ export const monitoringService = {
 }
 
 export const maintenanceService = {
-  getWorkOrders: (status?: string) => api.get("/maintenance/work-orders", { params: { status } }),
+  getWorkOrders: (status?: string) => api.get("/maintenance/orders", { params: { status } }),
 
-  createWorkOrder: (data: any) => api.post("/maintenance/work-orders", data),
+  createWorkOrder: (data: any) => api.post("/maintenance/orders", data),
 
-  updateWorkOrder: (id: number, data: any) => api.put(`/maintenance/work-orders/${id}`, data),
+  updateWorkOrder: (id: number, data: any) => api.put(`/maintenance/orders/${id}`, data),
 
-  getMaintenanceRecords: () => api.get("/maintenance/records"),
+  assignWorkOrder: (id: number, teamName: string) => api.put(`/maintenance/orders/${id}/assign`, null, { params: { team_name: teamName } }),
 
-  createMaintenanceRecord: (data: any) => api.post("/maintenance/records", data),
+  getMaintenanceRecords: () => api.get("/maintenance/maintenances"),
+
+  createMaintenanceRecord: (data: any) => api.post("/maintenance/maintenances", data),
 
   getComplaints: () => api.get("/maintenance/complaints"),
 
   createComplaint: (data: any) => api.post("/maintenance/complaints", data),
 
-  generateReport: (params: any) => api.post("/maintenance/reports/generate", params),
+  getTeams: () => api.get("/maintenance/teams"),
+
+  createTeam: (data: any) => api.post("/maintenance/teams", data),
+
+  generateReport: (params: any) => api.post("/maintenance/reports/interventions", params),
 }
 
 export const billingService = {

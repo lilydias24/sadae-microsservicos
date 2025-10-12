@@ -6,6 +6,7 @@ import random
 import httpx
 from datetime import datetime, timedelta
 import sys
+import os
 
 # Add shared modules to path
 sys.path.append('/app/shared')
@@ -14,8 +15,8 @@ from models import SensorType
 class SensorSimulator:
     """Simulate sensor data for testing"""
     
-    def __init__(self, base_url: str = "http://localhost:8002"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None):
+        self.base_url = base_url or os.getenv("MONITORING_SERVICE_URL", "http://localhost:8002")
         self.sensors = [
             {
                 "id": "PRESS_001",
@@ -87,6 +88,39 @@ class SensorSimulator:
                         print(f"Created sensor: {sensor['name']}")
                 except Exception as e:
                     print(f"Error creating sensor {sensor['name']}: {e}")
+
+    async def ensure_sensor_exists(self, sensor: dict):
+        """Ensure sensor exists; if not, create it."""
+        async with httpx.AsyncClient() as client:
+            try:
+                # Try get
+                resp = await client.get(f"{self.base_url}/sensors/{sensor['id']}")
+                if resp.status_code == 200:
+                    return True
+            except Exception:
+                pass
+
+            # Create if missing
+            try:
+                create_resp = await client.post(
+                    f"{self.base_url}/sensors",
+                    json={
+                        "id": sensor["id"],
+                        "name": sensor["name"],
+                        "sensor_type": sensor["type"],
+                        "location": sensor["location"],
+                        "unit": sensor["unit"],
+                        "min_threshold": 0.0,
+                        "max_threshold": sensor["base_value"] * 2
+                    },
+                    headers={"Authorization": "Bearer test-token"}
+                )
+                if create_resp.status_code == 200:
+                    print(f"Ensured sensor exists: {sensor['name']}")
+                    return True
+            except Exception as e:
+                print(f"Error ensuring sensor {sensor['name']}: {e}")
+        return False
     
     async def generate_reading(self, sensor: dict) -> dict:
         """Generate a realistic sensor reading"""
@@ -132,6 +166,14 @@ class SensorSimulator:
                 if response.status_code == 200:
                     print(f"Sent reading: {reading['sensor_id']} = {reading['value']} {reading['unit']}")
                 else:
+                    # If not found, try to create the sensor then resend once
+                    if response.status_code == 404:
+                        sensor = next((s for s in self.sensors if s["id"] == reading["sensor_id"]), None)
+                        if sensor and await self.ensure_sensor_exists(sensor):
+                            retry = await client.post(f"{self.base_url}/readings", json=reading)
+                            if retry.status_code == 200:
+                                print(f"Sent reading after ensure: {reading['sensor_id']} = {reading['value']} {reading['unit']}")
+                                return
                     print(f"Error sending reading: {response.status_code}")
             except Exception as e:
                 print(f"Error sending reading: {e}")
@@ -188,3 +230,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+

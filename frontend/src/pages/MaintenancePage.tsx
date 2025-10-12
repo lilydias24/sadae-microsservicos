@@ -1,6 +1,7 @@
-"use client"
-
 import { useState, useEffect } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { maintenanceService } from "../services/api"
+import { useAuth } from "../contexts/AuthContext"
 
 interface WorkOrder {
   id: string
@@ -31,26 +32,13 @@ interface Complaint {
   created_at: string
 }
 
-// Mock data
-const mockWorkOrders: WorkOrder[] = [
-  
-]
-
-const mockTeams: Team[] = [
-  
-]
-
-const mockComplaints: Complaint[] = [
- 
-]
-
 export function MaintenancePage() {
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints">("orders")
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null)
   const [showCreateOrder, setShowCreateOrder] = useState(false)
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(mockWorkOrders)
-  const [teams, setTeams] = useState<Team[]>(mockTeams)
-  const [complaints, setComplaints] = useState<Complaint[]>(mockComplaints)
+  
   // Estado para o formulário de criação de ordem de serviço
   const [newOrder, setNewOrder] = useState<Partial<WorkOrder>>({
     title: "",
@@ -59,28 +47,85 @@ export function MaintenancePage() {
     location: "",
     estimated_duration: 1,
   })
+
+  // Queries para buscar dados da API
+  const { data: workOrdersResponse, isLoading: loadingOrders } = useQuery({
+    queryKey: ['workOrders'],
+    queryFn: () => maintenanceService.getWorkOrders(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+
+  const { data: teamsResponse, isLoading: loadingTeams } = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => maintenanceService.getTeams(),
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  })
+
+  const { data: complaintsResponse, isLoading: loadingComplaints } = useQuery({
+    queryKey: ['complaints'],
+    queryFn: () => maintenanceService.getComplaints(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+
+  // Extrair dados das respostas da API
+  const workOrders = Array.isArray(workOrdersResponse?.data) ? workOrdersResponse.data : []
+  const teams = Array.isArray(teamsResponse?.data) ? teamsResponse.data : []
+  const complaints = Array.isArray(complaintsResponse?.data) ? complaintsResponse.data : []
+
+  // Mutations para criar e atualizar ordens
+  const createOrderMutation = useMutation({
+    mutationFn: (orderData: any) => maintenanceService.createWorkOrder(orderData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+      setShowCreateOrder(false)
+      setNewOrder({
+        title: "",
+        description: "",
+        priority: "média",
+        location: "",
+        estimated_duration: 1,
+      })
+    },
+    onError: (error) => {
+      console.error('Erro ao criar ordem de serviço:', error)
+    }
+  })
+
+  const assignTeamMutation = useMutation({
+    mutationFn: ({ orderId, teamName }: { orderId: string, teamName: string }) => 
+      maintenanceService.assignWorkOrder(parseInt(orderId), teamName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+      setSelectedOrder(null)
+    },
+    onError: (error) => {
+      console.error('Erro ao atribuir equipe:', error)
+    }
+  })
   const assignTeam = (orderId: string, teamId: string) => {
-    setWorkOrders(prev => prev.map(order => 
-      order.id === orderId ? { ...order, assigned_team: teams.find(t => t.id === teamId)?.name || null, status: "atribuido" as const } : order
-    ))
-    setSelectedOrder(null)
+    const team = teams.find(t => t.id === teamId)
+    if (team) {
+      assignTeamMutation.mutate({ orderId, teamName: team.name })
+    }
+  }
+
+  // Mapeamento de prioridades do português (UI) para inglês (API)
+  const priorityMapping = {
+    "baixa": "low",
+    "média": "medium", 
+    "alta": "high",
+    "urgente": "critical"
   }
 
   const createOrder = (orderData: Partial<WorkOrder>) => {
-    const newOrder: WorkOrder = {
-      id: Date.now().toString(),
+    const orderPayload = {
       title: orderData.title || "",
       description: orderData.description || "",
-      priority: orderData.priority || "média",
-      status: "aberto",
-      assigned_team: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      priority: priorityMapping[orderData.priority as keyof typeof priorityMapping] || "medium",
       location: orderData.location || "",
       estimated_duration: orderData.estimated_duration || 1
     }
-    setWorkOrders(prev => [...prev, newOrder])
-    setShowCreateOrder(false)
+    createOrderMutation.mutate(orderPayload)
   }
 
   const getPriorityColor = (priority: string) => {
@@ -91,11 +136,19 @@ export function MaintenancePage() {
         return "text-yellow-600 bg-yellow-100"
       case "high":
         return "text-orange-600 bg-orange-100"
-      case "urgent":
+      case "critical":
         return "text-red-600 bg-red-100"
       default:
         return "text-gray-600 bg-gray-100"
     }
+  }
+
+  // Mapeamento reverso para exibição (inglês -> português)
+  const priorityDisplayMapping = {
+    "low": "baixa",
+    "medium": "média",
+    "high": "alta", 
+    "critical": "urgente"
   }
 
   const getStatusColor = (status: string) => {
@@ -114,7 +167,7 @@ export function MaintenancePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -214,9 +267,10 @@ export function MaintenancePage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={createOrderMutation.isPending}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Criar Ordem
+                  {createOrderMutation.isPending ? "Criando..." : "Criar Ordem"}
                 </button>
               </div>
             </form>
@@ -254,46 +308,56 @@ export function MaintenancePage() {
             <h3 className="text-lg font-semibold text-gray-900">Ordens de Serviço</h3>
           </div>
           <div className="divide-y divide-gray-200">
-            {workOrders.map((order: WorkOrder) => (
-              <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3">
-                      <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
-                      <span
-                        className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
-                      >
-                        {order.priority}
-                      </span>
-                      <span
-                        className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
-                      >
-                        {order.status}
-                      </span>
+            {loadingOrders ? (
+              <div className="px-6 py-8 text-center text-gray-500">
+                Carregando ordens de serviço...
+              </div>
+            ) : workOrders.length === 0 ? (
+              <div className="px-6 py-8 text-center text-gray-500">
+                Nenhuma ordem de serviço encontrada.
+              </div>
+            ) : (
+              workOrders.map((order: WorkOrder) => (
+                <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3">
+                        <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
+                        >
+                          {priorityDisplayMapping[order.priority as keyof typeof priorityDisplayMapping] || order.priority}
+                        </span>
+                        <span
+                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
+                        >
+                          {order.status}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">{order.description}</p>
+                      <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                        <span>📍 {order.location}</span>
+                        <span>⏱️ {order.estimated_duration}h</span>
+                        <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
+                      </div>
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">{order.description}</p>
-                    <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                      <span>📍 {order.location}</span>
-                      <span>⏱️ {order.estimated_duration}h</span>
-                      <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    {order.status === "aberto" && (
-                      <button
-                        onClick={() => setSelectedOrder(order)}
-                        className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                      >
-                        Atribuir Equipe
+                    <div className="flex items-center space-x-2">
+                      {order.status === "aberto" && (
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          Atribuir Equipe
+                        </button>
+                      )}
+                      <button className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">
+                        Ver Detalhes
                       </button>
-                    )}
-                    <button className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">
-                      Ver Detalhes
-                    </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}

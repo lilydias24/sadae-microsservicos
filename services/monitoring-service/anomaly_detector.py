@@ -1,6 +1,5 @@
-import asyncio
-from typing import Tuple
-from datetime import datetime, timedelta
+from typing import Tuple, Dict, Any
+from datetime import datetime
 import statistics
 import sys
 
@@ -9,7 +8,15 @@ sys.path.append('/app/shared')
 from models import SensorType, AlertLevel
 
 class AnomalyDetector:
-    """Anomaly detection system for sensor readings"""
+    """Anomaly detection system for sensor readings.
+
+    Regras de detecção:
+    1) Limiares absolutos por tipo de sensor (min/max) definem se há anomalia e
+       estimam severidade de acordo com a distância relativa ao limiar.
+    2) Análise estatística baseada em desvio-padrão recente (z-score) usando
+       cache in-memory por sensor. O fator de desvio (deviation_factor) é
+       específico por tipo e parametriza a sensibilidade.
+    """
     
     def __init__(self):
         # Default thresholds for different sensor types
@@ -22,7 +29,7 @@ class AnomalyDetector:
         }
         
         # Cache for historical data analysis
-        self.historical_cache = {}
+        self.historical_cache: Dict[str, list[Dict[str, Any]]] = {}
     
     async def detect(self, reading) -> Tuple[bool, AlertLevel]:
         """
@@ -49,35 +56,56 @@ class AnomalyDetector:
                     return True, AlertLevel.HIGH
                 else:
                     return True, AlertLevel.MEDIUM
-            
+
             elif sensor_type == SensorType.FLOW:
-                if value > max_threshold * 1.3:
+                if value > max_threshold * 1.3 or value < min_threshold * 0.7:
                     return True, AlertLevel.CRITICAL
-                elif value > max_threshold * 1.1:
+                elif value > max_threshold * 1.1 or value < min_threshold * 0.9:
                     return True, AlertLevel.HIGH
                 else:
                     return True, AlertLevel.MEDIUM
-            
+
             elif sensor_type == SensorType.WATER_QUALITY:
+                # Qualidade de água fora de faixa é mais sensível
                 if value < 20 or value > 95:  # Critical water quality issues
                     return True, AlertLevel.CRITICAL
                 elif value < 40 or value > 85:
                     return True, AlertLevel.HIGH
                 else:
                     return True, AlertLevel.MEDIUM
-            
+
+            elif sensor_type == SensorType.PRECIPITATION:
+                if value > max_threshold * 1.5:
+                    return True, AlertLevel.CRITICAL
+                elif value > max_threshold * 1.2:
+                    return True, AlertLevel.HIGH
+                else:
+                    return True, AlertLevel.MEDIUM
+
+            elif sensor_type == SensorType.RIVER_LEVEL:
+                if value > max_threshold * 1.4:
+                    return True, AlertLevel.CRITICAL
+                elif value > max_threshold * 1.15:
+                    return True, AlertLevel.HIGH
+                else:
+                    return True, AlertLevel.MEDIUM
+
             else:
                 return True, AlertLevel.MEDIUM
         
         # Check for statistical anomalies (sudden changes)
-        historical_anomaly = await self._check_statistical_anomaly(sensor_id, sensor_type, value)
-        if historical_anomaly:
-            return True, AlertLevel.MEDIUM
+        historical_severity = await self._check_statistical_anomaly(sensor_id, sensor_type, value)
+        if historical_severity is not None:
+            return True, historical_severity
         
         return False, AlertLevel.LOW
     
-    async def _check_statistical_anomaly(self, sensor_id: str, sensor_type: SensorType, current_value: float) -> bool:
-        """Check for statistical anomalies based on historical data"""
+    async def _check_statistical_anomaly(self, sensor_id: str, sensor_type: SensorType, current_value: float) -> AlertLevel | None:
+        """Check for statistical anomalies based on historical data.
+
+        Returns AlertLevel when anomalia estatística for detectada,
+        caso contrário retorna None.
+        """
         try:
             # This would typically query the database for recent readings
             # For now, we'll use a simplified approach
@@ -102,7 +130,7 @@ class AnomalyDetector:
             
             # Need at least 10 readings for statistical analysis
             if len(recent_readings) < 10:
-                return False
+                return None
             
             # Calculate statistics
             values = [r["value"] for r in recent_readings[:-1]]  # Exclude current reading
@@ -110,25 +138,39 @@ class AnomalyDetector:
             stdev = statistics.stdev(values) if len(values) > 1 else 0
             
             if stdev == 0:
-                return False
+                return None
             
             # Check if current value is more than 2 standard deviations away
             deviation_factor = self.default_thresholds.get(sensor_type, {}).get("deviation_factor", 2.0)
             z_score = abs(current_value - mean) / stdev
-            
-            return z_score > deviation_factor
+
+            # Mapear severidade por múltiplos do fator de desvio
+            if z_score > deviation_factor * 3:
+                return AlertLevel.CRITICAL
+            if z_score > deviation_factor * 2:
+                return AlertLevel.HIGH
+            if z_score > deviation_factor:
+                return AlertLevel.MEDIUM
+            return None
             
         except Exception as e:
             print(f"Error in statistical anomaly detection: {e}")
-            return False
+            return None
     
     def get_threshold(self, sensor_id: str, sensor_type: SensorType) -> float:
-        """Get threshold value for a sensor"""
+        """Get upper threshold (max) value for a sensor type.
+
+        Note: `sensor_id` mantido para compatibilidade futura
+        (quando thresholds forem por sensor).
+        """
         thresholds = self.default_thresholds.get(SensorType(sensor_type), {})
         return thresholds.get("max", 100.0)
     
     async def update_thresholds(self, sensor_id: str, sensor_type: SensorType, min_val: float, max_val: float):
-        """Update thresholds for a specific sensor"""
+        """Update thresholds for a specific sensor type.
+
+        Note: `sensor_id` mantido para compatibilidade futura.
+        """
         # This would typically update the database
         # For now, we'll update the default thresholds
         if sensor_type not in self.default_thresholds:
@@ -136,3 +178,17 @@ class AnomalyDetector:
         
         self.default_thresholds[sensor_type]["min"] = min_val
         self.default_thresholds[sensor_type]["max"] = max_val
+
+    def get_thresholds(self, sensor_type: SensorType) -> Dict[str, float]:
+        """Return current min/max/deviation_factor for a sensor type."""
+        return {
+            "min": self.default_thresholds.get(sensor_type, {}).get("min", float("-inf")),
+            "max": self.default_thresholds.get(sensor_type, {}).get("max", float("inf")),
+            "deviation_factor": self.default_thresholds.get(sensor_type, {}).get("deviation_factor", 2.0),
+        }
+
+    def reset_cache(self):
+        """Clear historical cache (useful for tests)."""
+        self.historical_cache.clear()
+
+

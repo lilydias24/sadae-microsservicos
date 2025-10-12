@@ -59,7 +59,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (storedToken && storedUser) {
       setToken(storedToken)
       setUser(JSON.parse(storedUser))
-      api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`
+      // Let the axios interceptor handle the Authorization header
     }
 
     setIsLoading(false)
@@ -67,54 +67,73 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (username: string, password: string) => {
     try {
-      // Para demonstração, simulamos um login bem-sucedido
-      // Na implementação real, isso faria uma chamada para a API
-      const mockUser: User = {
-        user_id: 1,
-        username,
-        email: `${username}@example.com`,
-        full_name: username.charAt(0).toUpperCase() + username.slice(1),
-        role: username,
-        is_active: true
-      }
+      // Call the real auth service API
+      const response = await api.post("/auth/login", {
+        email: username, // LoginPage sends email as username
+        password: password
+      })
+
+      const { access_token, user } = response.data
       
-      const mockToken = `mock-jwt-token-${Date.now()}`
+      // Update user structure to match frontend interface
+      const frontendUser: User = {
+        user_id: user.id,
+        username: user.email,
+        email: user.email,
+        full_name: user.name,
+        role: user.role,
+        is_active: user.is_active,
+        phone: undefined,
+        address: undefined
+      }
 
-      setToken(mockToken)
-      setUser(mockUser)
+      setToken(access_token)
+      setUser(frontendUser)
 
-      localStorage.setItem("token", mockToken)
-      localStorage.setItem("user", JSON.stringify(mockUser))
-    } catch (error) {
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(frontendUser))
+      
+      // Let the axios interceptor handle the Authorization header automatically
+    } catch (error: any) {
+      console.error("Login error:", error)
       throw error
     }
   }
 
   const register = async (userData: RegisterData) => {
     try {
-      // Simulação de registro - na implementação real, faria chamada para API
-      console.log("Registering user:", userData)
-      
-      // Criar usuário mockado baseado nos dados fornecidos
-      const mockUser: User = {
-        user_id: Math.floor(Math.random() * 1000),
-        username: userData.username,
+      // Call the real auth service API
+      const response = await api.post("/auth/register", {
         email: userData.email,
-        full_name: userData.full_name,
-        role: userData.role,
-        is_active: true
+        name: userData.full_name,
+        password: userData.password,
+        role: userData.role
+      })
+
+      const { access_token, user } = response.data
+      
+      // Update user structure to match frontend interface
+      const frontendUser: User = {
+        user_id: user.id,
+        username: user.email,
+        email: user.email,
+        full_name: user.name,
+        role: user.role,
+        is_active: user.is_active,
+        phone: undefined,
+        address: undefined
       }
-      
-      const mockToken = `mock-jwt-token-${Date.now()}`
 
-      setToken(mockToken)
-      setUser(mockUser)
+      setToken(access_token)
+      setUser(frontendUser)
 
-      localStorage.setItem("token", mockToken)
-      localStorage.setItem("user", JSON.stringify(mockUser))
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(frontendUser))
       
-      console.log("User registered successfully:", mockUser)
-    } catch (error) {
+      // Let the axios interceptor handle the Authorization header automatically
+      
+      console.log("User registered successfully:", frontendUser)
+    } catch (error: any) {
       console.error("Registration error:", error)
       throw error
     }

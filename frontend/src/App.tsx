@@ -7,11 +7,9 @@ import { Layout } from "./components/Layout"
 
 // Pages
 import { LoginPage } from "./pages/LoginPage"
-
 import { DashboardPage } from "./pages/DashboardPage"
-
-import { MaintenancePage } from "./pages/MaintenancePage"
-
+import { BillingPage } from "./pages/BillingPage"
+import { SupportPage } from "./pages/SupportPage"
 
 import "./index.css"
 
@@ -35,14 +33,14 @@ function App() {
               <Routes>
                 {/* Public routes */}
                 <Route path="/login" element={<LoginPage />} />
-                
+
                 {/* Protected routes */}
                 <Route
                   path="/"
                   element={
                     <ProtectedRoute>
                       <Layout>
-                        <Navigate to="/maintenance" replace />
+                        <Navigate to="/dashboard" replace />
                       </Layout>
                     </ProtectedRoute>
                   }
@@ -57,19 +55,26 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
-                
                 <Route
-                  path="/maintenance/*"
+                  path="/billing/*"
                   element={
-                    <ProtectedRoute allowedRoles={["maintenance_manager", "operator"]}>
+                    <ProtectedRoute>
                       <Layout>
-                        <MaintenancePage />
+                        <BillingPage />
                       </Layout>
                     </ProtectedRoute>
                   }
                 />
-                
-                
+                <Route
+                  path="/support"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <SupportPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
               </Routes>
             </div>
           </Router>

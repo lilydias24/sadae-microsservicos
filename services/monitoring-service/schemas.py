@@ -110,3 +110,5 @@ class ReportFilters(BaseModel):
     location: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+
+
