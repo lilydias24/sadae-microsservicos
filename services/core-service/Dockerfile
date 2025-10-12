@@ -2,14 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy shared directory
+# Copy shared directory from project root (contexto é a raiz do projeto)
 COPY shared/ /app/shared/
 
-# Copy core service
-COPY services/core-service/ /app/
+# Copy core service files
+COPY services/core-service/ .
 
 # Install dependencies
-RUN pip install fastapi uvicorn sqlalchemy psycopg2-binary httpx python-multipart
+RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 8000
 

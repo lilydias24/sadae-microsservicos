@@ -9,6 +9,8 @@ import { Layout } from "./components/Layout"
 import { LoginPage } from "./pages/LoginPage"
 import { DashboardPage } from "./pages/DashboardPage"
 import { BillingPage } from "./pages/BillingPage"
+import { MaintenancePage } from "./pages/MaintenancePage"
+import { MonitoringPage } from "./pages/MonitoringPage"
 import { SupportPage } from "./pages/SupportPage"
 
 import "./index.css"
@@ -61,6 +63,26 @@ function App() {
                     <ProtectedRoute>
                       <Layout>
                         <BillingPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/maintenance"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MaintenancePage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/monitoring"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MonitoringPage />
                       </Layout>
                     </ProtectedRoute>
                   }

@@ -9,7 +9,7 @@ export const appConfig = {
     billing: "/billing", 
     monitoring: "/monitoring",
     maintenance: "/maintenance",
-    crisis: "/crisis"
+    support: "/support"
   },
   
   // Mock data fallback
@@ -18,7 +18,7 @@ export const appConfig = {
 
 // Helper function to determine data source
 export const shouldUseRealData = () => {
-  return appConfig.useRealData && process.env.NODE_ENV !== 'development'
+  return appConfig.useRealData
 }
 
 export default appConfig

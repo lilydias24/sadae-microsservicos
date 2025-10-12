@@ -1,9 +1,19 @@
-version: '3.8'
-
 services:
+  # Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    depends_on:
+      - api-gateway
+
   # API Gateway
   api-gateway:
-    build: ./services/api-gateway
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
     ports:
       - "8080:8000"
     depends_on:
@@ -13,9 +23,11 @@ services:
       - AUTH_SERVICE_URL=http://auth-service:8001
       - CORE_SERVICE_URL=http://core-service:8002
 
-  # Auth Service (mantém separado)
+  # Auth Service
   auth-service:
-    build: ./services/auth-service
+    build:
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
     ports:
       - "8001:8000"
     depends_on:
@@ -23,9 +35,11 @@ services:
     environment:
       - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
 
-  # Core Service (consolida billing + support + maintenance + monitoring)
+  # Core Service
   core-service:
-    build: ./services/core-service
+    build:
+      context: .
+      dockerfile: ./services/core-service/Dockerfile
     ports:
       - "8002:8000"
     depends_on:
@@ -33,7 +47,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://core_user:core_pass@core-db:5432/core_db
 
-  # Apenas 2 bancos de dados
+  # Databases
   auth-db:
     image: postgres:15
     environment:

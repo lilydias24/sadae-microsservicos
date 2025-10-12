@@ -7,15 +7,15 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared modules
+# Copy shared directory from project root (contexto é a raiz do projeto)
 COPY shared/ /app/shared/
 
-# Copy service files
-COPY services/auth-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+# Copy auth service files
 COPY services/auth-service/ .
 
-EXPOSE 8001
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

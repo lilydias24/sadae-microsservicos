@@ -2,10 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY services/api-gateway/requirements.txt .
+# Copy requirements first for better caching
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY services/api-gateway/ .
+# Copy the application code (o contexto já está na pasta api-gateway)
+COPY . .
 
 EXPOSE 8000
 

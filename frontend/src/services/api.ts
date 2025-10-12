@@ -45,18 +45,18 @@ api.interceptors.response.use(
 
 // API service functions
 export const authService = {
-  login: (username: string, password: string) => api.post("/login", { username, password }),
+  login: (username: string, password: string) => api.post("/auth/login", { username, password }),
 
-  register: (userData: any) => api.post("/register", userData),
+  register: (userData: any) => api.post("/auth/register", userData),
 
   getCurrentUser: () => api.get("/me"),
 }
 
 export const monitoringService = {
-  getSensors: () => api.get("http://localhost:8002/sensors"),
+  getSensors: () => api.get("/monitoring/sensors"),
 
   getSensorReadings: (sensorId?: number, limit = 100) =>
-    axios.get("http://localhost:8002/sensors/readings", { params: { sensor_id: sensorId, limit } }),
+    api.get("/monitoring/readings/realtime", { params: { sensor_id: sensorId, limit } }),
 
   getAnomalies: (status?: string) => api.get("/monitoring/anomalies", { params: { status } }),
 
@@ -109,6 +109,8 @@ export const billingService = {
   getMeterReadings: (meterId?: number) => api.get("/billing/meter-readings", { params: { meter_id: meterId } }),
 }
 
+// Crisis service temporarily disabled - endpoints not available in current backend
+/*
 export const crisisService = {
   getCriticalEvents: (status?: string) => api.get("/crisis/events/critical", { params: { status } }),
 
@@ -132,3 +134,4 @@ export const crisisService = {
 
   createMitigationPlan: (data: any) => api.post("/crisis/mitigation-plans", data),
 }
+*/
