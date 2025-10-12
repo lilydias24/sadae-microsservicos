@@ -1,157 +1,57 @@
 version: '3.8'
 
 services:
-  # Databases (start first)
+  # API Gateway
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "8080:8000"
+    depends_on:
+      - auth-service
+      - core-service
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - CORE_SERVICE_URL=http://core-service:8002
+
+  # Auth Service (mantém separado)
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "8001:8000"
+    depends_on:
+      - auth-db
+    environment:
+      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
+
+  # Core Service (consolida billing + support + maintenance + monitoring)
+  core-service:
+    build: ./services/core-service
+    ports:
+      - "8002:8000"
+    depends_on:
+      - core-db
+    environment:
+      - DATABASE_URL=postgresql://core_user:core_pass@core-db:5432/core_db
+
+  # Apenas 2 bancos de dados
   auth-db:
     image: postgres:15
     environment:
-      - POSTGRES_DB=auth_db
-      - POSTGRES_USER=auth_user
-      - POSTGRES_PASSWORD=auth_pass
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
     volumes:
-      - auth_db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sadae-network
+      - auth_data:/var/lib/postgresql/data
 
-  billing-db:
+  core-db:
     image: postgres:15
     environment:
-      - POSTGRES_DB=billing_db
-      - POSTGRES_USER=billing_user
-      - POSTGRES_PASSWORD=billing_pass
+      POSTGRES_DB: core_db
+      POSTGRES_USER: core_user
+      POSTGRES_PASSWORD: core_pass
     volumes:
-      - billing_db_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U billing_user -d billing_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sadae-network
-
-  support-db:
-    image: postgres:15
-    environment:
-      - POSTGRES_DB=support_db
-      - POSTGRES_USER=support_user
-      - POSTGRES_PASSWORD=support_pass
-    volumes:
-      - support_db_data:/var/lib/postgresql/data
-    ports:
-      - "5434:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U support_user -d support_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sadae-network
-
-  # Authentication Service
-  auth-service:
-    build:
-      context: .
-      dockerfile: ./services/auth-service/Dockerfile
-    ports:
-      - "8001:8001"
-    environment:
-      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
-      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
-      - JWT_ALGORITHM=HS256
-      - JWT_EXPIRATION_HOURS=24
-    depends_on:
-      auth-db:
-        condition: service_healthy
-    restart: on-failure
-    networks:
-      - sadae-network
-
-  # Billing Service
-  billing-service:
-    build:
-      context: .
-      dockerfile: ./services/billing-service/Dockerfile
-    ports:
-      - "8004:8004"
-    environment:
-      - DATABASE_URL=postgresql://billing_user:billing_pass@billing-db:5432/billing_db
-      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
-      - JWT_ALGORITHM=HS256
-      - JWT_EXPIRATION_HOURS=24
-    depends_on:
-      billing-db:
-        condition: service_healthy
-    restart: on-failure
-    networks:
-      - sadae-network
-
-  # Support Service
-  support-service:
-    build:
-      context: .
-      dockerfile: ./services/support-service/Dockerfile
-    ports:
-      - "8005:8000"
-    environment:
-      - DATABASE_URL=postgresql://support_user:support_pass@support-db:5432/support_db
-      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
-      - JWT_ALGORITHM=HS256
-      - JWT_EXPIRATION_HOURS=24
-    depends_on:
-      support-db:
-        condition: service_healthy
-    restart: on-failure
-    networks:
-      - sadae-network
-
-  # API Gateway
-  api-gateway:
-    build: 
-      context: .
-      dockerfile: ./services/api-gateway/Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - AUTH_SERVICE_URL=http://auth-service:8001
-      - BILLING_SERVICE_URL=http://billing-service:8004
-      - SUPPORT_SERVICE_URL=http://support-service:8000
-    depends_on:
-      - auth-service
-      - billing-service
-      - support-service
-    restart: on-failure
-    networks:
-      - sadae-network
-
-  # Frontend Application
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
-    depends_on:
-      - api-gateway
-    restart: on-failure
-    networks:
-      - sadae-network
+      - core_data:/var/lib/postgresql/data
 
 volumes:
-  auth_db_data:
-  billing_db_data:
-  support_db_data:
-
-networks:
-  sadae-network:
-    driver: bridge
+  auth_data:
+  core_data:
