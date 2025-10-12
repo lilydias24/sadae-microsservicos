@@ -148,12 +148,17 @@ class SupportTicket(Base):
     client_id = Column(Integer, nullable=False)
     client_name = Column(String(100), nullable=False)
     client_email = Column(String(100), nullable=False)
+    client_phone = Column(String(20), nullable=True)
     assigned_agent_id = Column(Integer, nullable=True)
     assigned_agent_name = Column(String(100), nullable=True)
+    related_bill_id = Column(Integer, nullable=True)
+    related_order_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime, nullable=True)
     satisfaction_rating = Column(Integer, nullable=True)  # 1-5 stars
+    satisfaction_comment = Column(Text, nullable=True)
     
     # Relationships
     messages = relationship("TicketMessage", back_populates="ticket", cascade="all, delete-orphan")
@@ -165,9 +170,11 @@ class TicketMessage(Base):
     ticket_id = Column(Integer, ForeignKey("support_tickets.id"), nullable=False)
     message_type = Column(String(20), nullable=False)  # client, agent, system
     content = Column(Text, nullable=False)
-    author_id = Column(Integer, nullable=True)
+    author_user_id = Column(Integer, nullable=True)
     author_name = Column(String(100), nullable=False)
+    author_email = Column(String(100), nullable=True)
     is_internal = Column(Boolean, default=False)  # Internal notes for agents
+    attachments = Column(Text, nullable=True)  # JSON list of file URLs
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -180,13 +187,18 @@ class KnowledgeBaseArticle(Base):
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False)
     category = Column(String(50), nullable=False)
-    author_id = Column(Integer, nullable=False)
-    author_name = Column(String(100), nullable=False)
+    tags = Column(String(500), nullable=True)  # Comma-separated tags
+    slug = Column(String(250), unique=True, nullable=False)
+    meta_description = Column(String(300), nullable=True)
+    keywords = Column(String(500), nullable=True)
+    created_by_user_id = Column(Integer, nullable=False)
+    created_by_name = Column(String(100), nullable=False)
     view_count = Column(Integer, default=0)
     helpful_count = Column(Integer, default=0)
     not_helpful_count = Column(Integer, default=0)
     is_featured = Column(Boolean, default=False)
     is_published = Column(Boolean, default=True)
+    published_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -202,8 +214,8 @@ class SupportAgent(Base):
     is_active = Column(Boolean, default=True)
     max_concurrent_tickets = Column(Integer, default=10)
     current_ticket_count = Column(Integer, default=0)
-    total_tickets_resolved = Column(Integer, default=0)
-    average_rating = Column(Float, default=0.0)
+    tickets_resolved = Column(Integer, default=0)
+    satisfaction_average = Column(Float, default=0.0)
     average_response_time = Column(Float, default=0.0)  # in hours
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
@@ -220,11 +232,16 @@ class ServiceOrder(Base):
     location = Column(String, nullable=False)
     status = Column(String, default=ServiceOrderStatus.OPEN)  # ServiceOrderStatus enum
     created_by = Column(Integer, nullable=False)
-    assigned_team = Column(String)
-    assigned_at = Column(DateTime)
-    completed_at = Column(DateTime)
-    anomaly_id = Column(Integer)  # Reference to monitoring service anomaly
-    complaint_id = Column(Integer)  # Reference to complaint
+    created_by_name = Column(String(100), nullable=True)
+    assigned_team = Column(String, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    estimated_completion = Column(DateTime, nullable=True)
+    actual_cost = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    anomaly_id = Column(Integer, nullable=True)  # Reference to monitoring service anomaly
+    complaint_id = Column(Integer, nullable=True)  # Reference to complaint
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -232,17 +249,24 @@ class Maintenance(Base):
     __tablename__ = "maintenances"
     
     id = Column(Integer, primary_key=True, index=True)
-    service_order_id = Column(Integer, ForeignKey("service_orders.id"))
+    service_order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     team_name = Column(String, nullable=False)
     location = Column(String, nullable=False)
     completion_date = Column(DateTime, nullable=False)
-    duration_hours = Column(Float)
-    cost = Column(Float)
-    materials_used = Column(Text)
+    duration_hours = Column(Float, nullable=True)
+    cost = Column(Float, nullable=True)
+    materials_used = Column(Text, nullable=True)
+    equipment_used = Column(Text, nullable=True)
+    work_type = Column(String, nullable=True)
     registered_by = Column(Integer, nullable=False)
+    registered_by_name = Column(String(100), nullable=True)
+    photos = Column(Text, nullable=True)  # JSON list of photo URLs
+    quality_check = Column(Boolean, nullable=True)
+    quality_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class Complaint(Base):
     __tablename__ = "complaints"
@@ -255,7 +279,16 @@ class Complaint(Base):
     location = Column(String, nullable=False)
     citizen_name = Column(String, nullable=False)
     citizen_contact = Column(String, nullable=False)
+    citizen_email = Column(String, nullable=True)
+    urgency_level = Column(String, default="medium")  # AlertLevel enum
     status = Column(String, default="pending")
+    assigned_to = Column(String, nullable=True)
+    response_message = Column(Text, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    service_order_id = Column(Integer, nullable=True)
+    photos = Column(Text, nullable=True)  # JSON list of photo URLs
+    follow_up_required = Column(Boolean, default=False)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -265,9 +298,12 @@ class ServiceEvaluation(Base):
     id = Column(Integer, primary_key=True, index=True)
     service_order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=False)
     rating = Column(Integer, nullable=False)  # 1-5 stars
-    comment = Column(Text)
-    evaluator_name = Column(String)
-    evaluator_contact = Column(String)
+    comment = Column(Text, nullable=True)
+    evaluator_name = Column(String, nullable=True)
+    evaluator_contact = Column(String, nullable=True)
+    quality_aspects = Column(Text, nullable=True)  # JSON object with quality ratings
+    verified = Column(Boolean, default=False)
+    moderator_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Team(Base):
@@ -275,10 +311,18 @@ class Team(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False)
-    description = Column(Text)
-    specialization = Column(String)  # e.g., "plumbing", "electrical", "general"
+    description = Column(Text, nullable=True)
+    specialization = Column(String, nullable=True)  # e.g., "plumbing", "electrical", "general"
     members_count = Column(Integer, default=0)
+    max_concurrent_orders = Column(Integer, default=5)
+    supervisor_name = Column(String(100), nullable=True)
+    supervisor_contact = Column(String(200), nullable=True)
     is_active = Column(Boolean, default=True)
+    current_workload = Column(Integer, default=0)
+    work_areas = Column(Text, nullable=True)  # JSON list of work areas
+    equipment = Column(Text, nullable=True)  # JSON list of equipment
+    performance_rating = Column(Float, nullable=True)
+    completed_orders = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -291,12 +335,20 @@ class Sensor(Base):
     name = Column(String, nullable=False)
     sensor_type = Column(String, nullable=False)  # SensorType enum
     location = Column(String, nullable=False)
-    latitude = Column(Float)
-    longitude = Column(Float)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
     unit = Column(String, nullable=False)
-    min_threshold = Column(Float)
-    max_threshold = Column(Float)
+    min_threshold = Column(Float, nullable=True)
+    max_threshold = Column(Float, nullable=True)
     is_active = Column(Boolean, default=True)
+    installation_date = Column(DateTime, nullable=True)
+    manufacturer = Column(String(100), nullable=True)
+    model = Column(String(100), nullable=True)
+    calibration_date = Column(DateTime, nullable=True)
+    maintenance_interval_days = Column(Integer, nullable=True)
+    last_reading = Column(DateTime, nullable=True)
+    battery_level = Column(Float, nullable=True)
+    signal_strength = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -310,6 +362,12 @@ class SensorReading(Base):
     unit = Column(String, nullable=False)
     location = Column(String, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    quality_score = Column(Float, nullable=True)
+    battery_level = Column(Float, nullable=True)
+    signal_strength = Column(Float, nullable=True)
+    raw_data = Column(Text, nullable=True)  # JSON data
+    is_anomaly = Column(Boolean, default=False)
+    anomaly_score = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Anomaly(Base):
@@ -324,7 +382,14 @@ class Anomaly(Base):
     description = Column(Text, nullable=False)
     location = Column(String, nullable=False)
     status = Column(String, default=AnomalyStatus.PENDING)  # AnomalyStatus enum
-    operator_id = Column(Integer)
+    operator_id = Column(Integer, nullable=True)
+    operator_name = Column(String(100), nullable=True)
+    assigned_operator_id = Column(Integer, nullable=True)
+    reading_id = Column(Integer, nullable=True)
+    detection_method = Column(String(50), nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    additional_data = Column(Text, nullable=True)  # JSON data
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -334,9 +399,18 @@ class Observation(Base):
     id = Column(Integer, primary_key=True, index=True)
     sensor_id = Column(String, ForeignKey("sensors.id"), nullable=False)
     operator_id = Column(Integer, nullable=False)
+    operator_name = Column(String(100), nullable=True)
     text = Column(Text, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    observation_type = Column(String(50), nullable=True)
+    severity = Column(String, default="low")  # AlertLevel enum
+    photos = Column(Text, nullable=True)  # JSON list of photo URLs
+    action_required = Column(Boolean, default=False)
+    follow_up_notes = Column(Text, nullable=True)
+    resolved = Column(Boolean, default=False)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class LeakReport(Base):
     __tablename__ = "leak_reports"
@@ -347,7 +421,18 @@ class LeakReport(Base):
     description = Column(Text, nullable=False)
     reporter_name = Column(String, nullable=False)
     reporter_contact = Column(String, nullable=False)
-    status = Column(String, default="pending")
+    reporter_email = Column(String, nullable=True)
+    urgency_level = Column(String, default="medium")  # AlertLevel enum
+    estimated_size = Column(String(50), nullable=True)
+    water_flow_stopped = Column(Boolean, default=False)
+    status = Column(String, default="pending")  # LeakReportStatus enum
+    assigned_team = Column(String(100), nullable=True)
+    investigation_notes = Column(Text, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    estimated_repair_cost = Column(Float, nullable=True)
+    actual_repair_cost = Column(Float, nullable=True)
+    photos = Column(Text, nullable=True)  # JSON list of photo URLs
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
