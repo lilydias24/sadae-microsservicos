@@ -179,9 +179,11 @@ export function SupportPage() {
     try {
       setLoading(true)
       const { data } = await api.get('/support/tickets')
-      setTickets(data)
+      // Garantir que data seja sempre um array
+      setTickets(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('Error fetching tickets:', error)
+      setTickets([]) // Definir array vazio em caso de erro
     } finally {
       setLoading(false)
     }
@@ -314,20 +316,22 @@ export function SupportPage() {
     try {
       await api.post(`/support/tickets/${selectedTicket.id}/messages`, { content: newMessage })
       setNewMessage('')
-      fetchTicketMessages(selectedTicket.id)
+      if (selectedTicket.id) {
+        fetchTicketMessages(selectedTicket.id)
+      }
     } catch (error) {
       console.error('Error sending message:', error)
     }
   }
 
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch = ticket.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         ticket.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         ticket.ticket_number.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredTickets = Array.isArray(tickets) ? tickets.filter(ticket => {
+    const matchesSearch = (ticket.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (ticket.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (ticket.ticket_number || '').toLowerCase().includes(searchTerm.toLowerCase())
     const matchesStatus = filterStatus === 'all' || ticket.status === filterStatus
     const matchesCategory = filterCategory === 'all' || ticket.category === filterCategory
     return matchesSearch && matchesStatus && matchesCategory
-  })
+  }) : []
 
   // Knowledge Base filtering with text, category and tags
   const normalize = (s: string) => s.toLowerCase()
@@ -339,20 +343,20 @@ export function SupportPage() {
   }
   const kbFiltered = knowledgeBase.filter((a) => {
     if (!a.is_published) return false
-    const combined = `${a.title} ${a.content} ${a.keywords.join(' ')} ${a.tags.join(' ')}`
+    const combined = `${a.title || ''} ${a.content || ''} ${(a.keywords || []).join(' ')} ${(a.tags || []).join(' ')}`
     const textMatch = !kbSearch || normalize(combined).includes(normalize(kbSearch))
     const categoryMatch = kbCategory === 'all' || a.category === kbCategory
-    const tagMatch = !kbTag || a.tags.some((t) => normalize(t).includes(normalize(kbTag))) || (kbTagMap[a.id] && kbTagMap[a.id].some((t) => normalize(t).includes(normalize(kbTag))))
+    const tagMatch = !kbTag || (a.tags || []).some((t) => normalize(t || '').includes(normalize(kbTag))) || (kbTagMap[a.id] && kbTagMap[a.id].some((t) => normalize(t || '').includes(normalize(kbTag))))
     return textMatch && categoryMatch && tagMatch
   })
 
   // Auto suggestions while creating a ticket
-  const suggestionPool = knowledgeBase.map((a) => ({ id: a.id, title: a.title, category: a.category }))
+  const suggestionPool = knowledgeBase.map((a) => ({ id: a.id, title: a.title || '', category: a.category || '' }))
   const suggestions = !newTicket.title && !newTicket.description
     ? []
     : suggestionPool.filter((s) => {
-        const q = normalize(`${newTicket.title} ${newTicket.description}`)
-        return normalize(s.title).includes(q) || q.split(' ').some((w) => normalize(s.title).includes(w))
+        const q = normalize(`${newTicket.title || ''} ${newTicket.description || ''}`)
+        return normalize(s.title || '').includes(q) || q.split(' ').some((w) => normalize(s.title || '').includes(w))
       }).slice(0, 4)
 
   const markHelpful = (id: number, helpful: boolean) => {
@@ -504,8 +508,10 @@ export function SupportPage() {
                   <div
                     key={ticket.id}
                     onClick={() => {
-                      setSelectedTicket(ticket)
-                      fetchTicketMessages(ticket.id)
+                      if (ticket.id) {
+                        setSelectedTicket(ticket)
+                        fetchTicketMessages(ticket.id)
+                      }
                     }}
                     className="bg-white p-6 rounded-lg shadow border hover:shadow-md transition-shadow cursor-pointer"
                   >
@@ -538,7 +544,7 @@ export function SupportPage() {
                       <div className="flex flex-col items-end space-y-2">
                         <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm font-medium ${statusColors[ticket.status]}`}>
                           {getStatusIcon(ticket.status)}
-                          <span>{ticket.status.replace('_', ' ')}</span>
+                          <span>{(ticket.status || '').replace('_', ' ')}</span>
                         </div>
                         {ticket.satisfaction_rating && (
                           <div className="flex items-center space-x-1">
@@ -568,7 +574,7 @@ export function SupportPage() {
                 </button>
                 <h2 className="text-xl font-semibold">Ticket #{selectedTicket.ticket_number}</h2>
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedTicket.status]}`}>
-                  {selectedTicket.status.replace('_', ' ')}
+                  {(selectedTicket.status || '').replace('_', ' ')}
                 </span>
               </div>
 
@@ -796,7 +802,7 @@ export function SupportPage() {
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6 rounded-lg shadow">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-xl font-semibold">Bem-vindo, {agentDashboardStats.agent_info.name}</h2>
+                    <h2 className="text-xl font-semibold">Bem-vindo, {agentDashboardStats.agent_info?.name || 'Agente'}</h2>
                     <p className="text-blue-100">Atendente de Suporte</p>
                   </div>
                   <div className="text-center">
@@ -804,11 +810,11 @@ export function SupportPage() {
                       {[...Array(5)].map((_, i) => (
                         <Star
                           key={i}
-                          className={`w-4 h-4 ${i < Math.floor(agentDashboardStats.agent_info.satisfaction_rating) ? 'text-yellow-300 fill-current' : 'text-blue-300'}`}
+                          className={`w-4 h-4 ${i < Math.floor(agentDashboardStats.agent_info?.satisfaction_rating || 0) ? 'text-yellow-300 fill-current' : 'text-blue-300'}`}
                         />
                       ))}
                     </div>
-                    <p className="text-sm text-blue-100">Avaliação: {agentDashboardStats.agent_info.satisfaction_rating.toFixed(1)}</p>
+                    <p className="text-sm text-blue-100">Avaliação: {(agentDashboardStats.agent_info?.satisfaction_rating || 0).toFixed(1)}</p>
                   </div>
                 </div>
               </div>
@@ -823,7 +829,7 @@ export function SupportPage() {
                     <div className="ml-5 w-0 flex-1">
                       <dl>
                         <dt className="text-sm font-medium text-gray-500 truncate">Tickets Atribuídos</dt>
-                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets.total_assigned}</dd>
+                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets?.total_assigned || 0}</dd>
                       </dl>
                     </div>
                   </div>
@@ -837,7 +843,7 @@ export function SupportPage() {
                     <div className="ml-5 w-0 flex-1">
                       <dl>
                         <dt className="text-sm font-medium text-gray-500 truncate">Em Aberto</dt>
-                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets.open}</dd>
+                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets?.open || 0}</dd>
                       </dl>
                     </div>
                   </div>
@@ -851,7 +857,7 @@ export function SupportPage() {
                     <div className="ml-5 w-0 flex-1">
                       <dl>
                         <dt className="text-sm font-medium text-gray-500 truncate">Em Andamento</dt>
-                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets.in_progress}</dd>
+                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets?.in_progress || 0}</dd>
                       </dl>
                     </div>
                   </div>
@@ -865,7 +871,7 @@ export function SupportPage() {
                     <div className="ml-5 w-0 flex-1">
                       <dl>
                         <dt className="text-sm font-medium text-gray-500 truncate">Resolvidos Hoje</dt>
-                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets.resolved_today}</dd>
+                        <dd className="text-lg font-medium text-gray-900">{agentDashboardStats.my_tickets?.resolved_today || 0}</dd>
                       </dl>
                     </div>
                   </div>
@@ -880,25 +886,25 @@ export function SupportPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Novos Tickets Hoje</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {agentDashboardStats.daily_stats.new_tickets_today}
+                        {agentDashboardStats.daily_stats?.new_tickets_today || 0}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Aguardando Atribuição</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {agentDashboardStats.daily_stats.pending_assignment}
+                        {agentDashboardStats.daily_stats?.pending_assignment || 0}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Total Resolvidos</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {agentDashboardStats.agent_info.total_resolved}
+                        {agentDashboardStats.agent_info?.total_resolved || 0}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Tempo Médio de Resposta</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {agentDashboardStats.agent_info.average_response_time.toFixed(1)}h
+                        {(agentDashboardStats.agent_info?.average_response_time || 0).toFixed(1)}h
                       </span>
                     </div>
                   </div>
@@ -907,7 +913,7 @@ export function SupportPage() {
                 <div className="bg-white p-6 rounded-lg shadow border">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Tickets Pendentes</h3>
                   <div className="space-y-3 max-h-64 overflow-y-auto">
-                    {agentDashboardStats.pending_tickets.slice(0, 5).map((ticket: any) => (
+                    {Array.isArray(agentDashboardStats.pending_tickets) && agentDashboardStats.pending_tickets.slice(0, 5).map((ticket: any) => (
                       <div key={ticket.id} className="flex justify-between items-center p-3 bg-yellow-50 rounded border border-yellow-200">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">#{ticket.ticket_number}</p>
@@ -925,9 +931,11 @@ export function SupportPage() {
                         </div>
                         <button
                           onClick={() => {
-                            setSelectedTicket(ticket)
-                            setActiveTab('tickets')
-                            fetchTicketMessages(ticket.id)
+                            if (ticket.id) {
+                              setSelectedTicket(ticket)
+                              setActiveTab('tickets')
+                              fetchTicketMessages(ticket.id)
+                            }
                           }}
                           className="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >
@@ -945,14 +953,14 @@ export function SupportPage() {
                   <h3 className="text-lg font-semibold text-gray-900">Meus Tickets Recentes</h3>
                 </div>
                 <div className="divide-y divide-gray-200">
-                  {agentDashboardStats.recent_assigned.map((ticket: any) => (
+                  {Array.isArray(agentDashboardStats.recent_assigned) && agentDashboardStats.recent_assigned.map((ticket: any) => (
                     <div key={ticket.id} className="px-6 py-4 hover:bg-gray-50">
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-3">
                             <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status]}`}>
-                              {ticket.status.replace('_', ' ')}
+                              {(ticket.status || '').replace('_', ' ')}
                             </span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority]}`}>
                               {ticket.priority}
@@ -965,9 +973,11 @@ export function SupportPage() {
                         </div>
                         <button
                           onClick={() => {
-                            setSelectedTicket(ticket)
-                            setActiveTab('tickets')
-                            fetchTicketMessages(ticket.id)
+                            if (ticket.id) {
+                              setSelectedTicket(ticket)
+                              setActiveTab('tickets')
+                              fetchTicketMessages(ticket.id)
+                            }
                           }}
                           className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >
@@ -1099,7 +1109,7 @@ export function SupportPage() {
                           <div className="flex items-center space-x-3">
                             <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status]}`}>
-                              {ticket.status.replace('_', ' ')}
+                              {(ticket.status || '').replace('_', ' ')}
                             </span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority]}`}>
                               {ticket.priority}
@@ -1112,9 +1122,11 @@ export function SupportPage() {
                         </div>
                         <button
                           onClick={() => {
-                            setSelectedTicket(ticket)
-                            setActiveTab('tickets')
-                            fetchTicketMessages(ticket.id)
+                            if (ticket.id) {
+                              setSelectedTicket(ticket)
+                              setActiveTab('tickets')
+                              fetchTicketMessages(ticket.id)
+                            }
                           }}
                           className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >

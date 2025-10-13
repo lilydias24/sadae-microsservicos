@@ -2,10 +2,18 @@ import uuid
 import os
 from datetime import datetime
 from typing import Dict, Any
+from enum import Enum
 import httpx
 import logging
 
 logger = logging.getLogger(__name__)
+
+class UserRole(str, Enum):
+    """User roles enumeration"""
+    CITIZEN = "citizen"
+    ADMIN = "admin"
+    SUPPORT_AGENT = "support_agent"
+    MANAGER = "manager"
 
 def generate_protocol_number() -> str:
     """Generate a unique protocol number"""

@@ -45,6 +45,12 @@ def create_initial_users():
                 "role": UserRole.CITIZEN
             },
             {
+                "email": "suporte@sadae.com",
+                "name": "Ana Agente de Suporte",
+                "password": "suporte123",
+                "role": UserRole.SUPPORT_AGENT
+            },
+            {
                 "email": "gestor.crise@sadae.com",
                 "name": "Carlos Gestor de Crise",
                 "password": "crise123",

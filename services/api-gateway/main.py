@@ -9,10 +9,32 @@ import sys
 sys.path.append('/app/shared')
 
 try:
-    from utils import service_registry
+    from auth import verify_token
+    from utils import ServiceRegistry
+    # Create service registry instance
+    service_registry = ServiceRegistry()
 except ImportError as e:
-    print(f"Warning: Could not import service registry: {e}")
-    service_registry = {}
+    print(f"Warning: Could not import shared modules: {e}")
+    # Fallback function
+    def verify_token(token: str):
+        return {"sub": "fallback_user", "user_id": "1", "role": "user"}
+    
+    # Fallback service registry
+    class ServiceRegistry:
+        def __init__(self):
+            self.services = {
+            "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8000"),  
+            "core": os.getenv("CORE_SERVICE_URL", "http://core-service:8000")   
+        }
+    
+        def get_service_url(self, service_name: str) -> str:
+            """Get service URL by name"""
+        # ✅ Mapear todos os módulos para core service
+            if service_name in ["billing", "support", "maintenance", "monitoring"]:
+                return self.services.get("core")
+            return self.services.get(service_name, "http://localhost:8000")
+    
+    service_registry = ServiceRegistry()
 
 app = FastAPI(
     title="SADAE API Gateway",
@@ -23,32 +45,19 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://frontend:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],  # broadened for local dev to avoid CORS blocks
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 security = HTTPBearer()
 
-# Resolve service base URLs via environment
-AUTH_SERVICE_BASE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001")
-
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify JWT token via auth-service and get current user info"""
+    """Verify JWT token and get current user"""
     token = credentials.credentials
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{AUTH_SERVICE_BASE_URL}/verify-token",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("user", {})
-
-async def get_bearer_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Extract raw Bearer token for downstream services"""
-    return credentials.credentials
+    payload = verify_token(token)
+    return payload
 
 @app.get("/")
 async def root():
@@ -59,39 +68,64 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
 
-# Authentication routes (with and without /auth prefix for compatibility)
+# Redirect legacy support routes to proper prefixed routes
+@app.get("/tickets")
+async def redirect_tickets():
+    """Redirect legacy /tickets to /support/tickets"""
+    raise HTTPException(status_code=301, detail="Moved to /support/tickets", headers={"Location": "/support/tickets"})
+
+@app.get("/agent-dashboard")
+async def redirect_agent_dashboard():
+    """Redirect legacy /agent-dashboard to /support/agent-dashboard"""
+    raise HTTPException(status_code=301, detail="Moved to /support/agent-dashboard", headers={"Location": "/support/agent-dashboard"})
+
+@app.post("/tickets")
+async def redirect_post_tickets():
+    """Redirect legacy POST /tickets to /support/tickets"""
+    raise HTTPException(status_code=301, detail="Moved to /support/tickets", headers={"Location": "/support/tickets"})
+
+# Authentication routes
 @app.post("/auth/login")
-@app.post("/login")
 async def login(request: Request):
+    """Proxy login request to auth service"""
     body = await request.body()
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{AUTH_SERVICE_BASE_URL}/login",
-            content=body,
-            headers={"content-type": "application/json"}
-        )
-        return response.json()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying login to: {auth_url}/login")
+            
+            response = await client.post(
+                f"{auth_url}/login",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {e}")
 
 @app.post("/auth/register")
-@app.post("/register")
 async def register(request: Request):
+    """Proxy register request to auth service"""
     body = await request.body()
+    
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{AUTH_SERVICE_BASE_URL}/register",
+            f"{service_registry.get_service_url('auth')}/register",
             content=body,
             headers={"content-type": "application/json"}
-        )
-        return response.json()
-
-@app.get("/auth/me")
-@app.get("/me")
-async def me(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{AUTH_SERVICE_BASE_URL}/me",
-            headers={"Authorization": f"Bearer {token}"}
         )
         return response.json()
 
@@ -101,7 +135,7 @@ async def get_sensors(current_user: dict = Depends(get_current_user)):
     """Get all sensors data"""
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{service_registry.get_service_url('monitoring')}/sensors",
+            f"{service_registry.get_service_url('core')}/monitoring/sensors",
             headers={"Authorization": f"Bearer {current_user}"}
         )
         return response.json()
@@ -111,7 +145,7 @@ async def get_realtime_readings(current_user: dict = Depends(get_current_user)):
     """Get real-time sensor readings"""
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{service_registry.get_service_url('monitoring')}/readings/realtime",
+            f"{service_registry.get_service_url('core')}/monitoring/readings/realtime",
             headers={"Authorization": f"Bearer {current_user}"}
         )
         return response.json()
@@ -123,7 +157,7 @@ async def create_anomaly(request: Request, current_user: dict = Depends(get_curr
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('monitoring')}/anomalies",
+            f"{service_registry.get_service_url('core')}/monitoring/anomalies",
             content=body,
             headers={
                 "content-type": "application/json",
@@ -138,7 +172,7 @@ async def get_service_orders(current_user: dict = Depends(get_current_user)):
     """Get service orders"""
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{service_registry.get_service_url('maintenance')}/orders",
+            f"{service_registry.get_service_url('core')}/maintenance/orders",
             headers={"Authorization": f"Bearer {current_user}"}
         )
         return response.json()
@@ -150,7 +184,7 @@ async def create_service_order(request: Request, current_user: dict = Depends(ge
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('maintenance')}/orders",
+            f"{service_registry.get_service_url('core')}/maintenance/orders",
             content=body,
             headers={
                 "content-type": "application/json",
@@ -161,28 +195,295 @@ async def create_service_order(request: Request, current_user: dict = Depends(ge
 
 # Billing routes
 @app.get("/billing/bills")
-async def get_bills(current_user: dict = Depends(get_current_user)):
+async def get_bills(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Get bills"""
+    # Verify token first
+    verify_token(credentials.credentials)
+    
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"{service_registry.get_service_url('billing')}/bills",
-            headers={"Authorization": f"Bearer {current_user}"}
+            f"{service_registry.get_service_url('core')}/billing/bills",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
         )
         return response.json()
 
 @app.post("/billing/contests")
-async def create_bill_contest(request: Request, current_user: dict = Depends(get_current_user)):
+async def create_bill_contest(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Contest a bill"""
+    # Verify token first
+    verify_token(credentials.credentials)
+    
     body = await request.body()
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('billing')}/contests",
+            f"{service_registry.get_service_url('core')}/billing/contests",
             content=body,
             headers={
                 "content-type": "application/json",
-                "Authorization": f"Bearer {current_user}"
+                "Authorization": f"Bearer {credentials.credentials}"
             }
+        )
+        return response.json()
+
+@app.put("/billing/contests/{contest_id}/resolve")
+async def resolve_bill_contest(
+    contest_id: str, 
+    resolution: str, 
+    approved: bool,
+    new_amount: float = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Resolve a bill contest"""
+    # Verify token first
+    verify_token(credentials.credentials)
+    
+    params = {
+        "resolution": resolution,
+        "approved": str(approved).lower()
+    }
+    if new_amount is not None:
+        params["new_amount"] = str(new_amount)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('core')}/billing/contests/{contest_id}/resolve",
+            params=params,
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.get("/billing/contests")
+async def get_contests(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get all contests"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/billing/contests",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.post("/billing/debt-negotiations")
+async def create_debt_negotiation(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Create a debt negotiation"""
+    # Verify token first
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{service_registry.get_service_url('core')}/billing/negotiations",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        return response.json()
+
+@app.put("/billing/debt-negotiations/{negotiation_id}/resolve")
+async def resolve_debt_negotiation(
+    negotiation_id: str, 
+    approved: bool,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Resolve a debt negotiation"""
+    # Verify token first
+    verify_token(credentials.credentials)
+    
+    params = {
+        "approved": str(approved).lower()
+    }
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('core')}/billing/debt-negotiations/{negotiation_id}/resolve",
+            params=params,
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.get("/billing/negotiations")
+async def get_negotiations(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get all negotiations"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/billing/negotiations",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.post("/billing/negotiations")
+async def create_negotiation(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Create new negotiation"""
+    body = await request.body()
+    print(f"🔍 API Gateway - Creating negotiation with body: {body}")
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{service_registry.get_service_url('core')}/billing/negotiations",
+            headers={"Authorization": f"Bearer {credentials.credentials}", "Content-Type": "application/json"},
+            content=body
+        )
+        print(f"🔍 API Gateway - Response status: {response.status_code}")
+        print(f"🔍 API Gateway - Response text: {response.text}")
+        if response.status_code == 422:
+            raise HTTPException(status_code=422, detail=response.text)
+        return response.json()
+
+@app.post("/billing/payments")
+async def process_payment(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Process payment"""
+    body = await request.body()
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{service_registry.get_service_url('core')}/billing/payments",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        return response.json()
+
+# Support routes
+@app.get("/support/tickets")
+async def get_support_tickets(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get support tickets"""
+    verify_token(credentials.credentials)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/tickets",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.post("/support/tickets")
+async def create_support_ticket(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Create support ticket"""
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{service_registry.get_service_url('core')}/support/tickets",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        return response.json()
+
+@app.get("/support/tickets/{ticket_id}")
+async def get_support_ticket(ticket_id: int, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get specific support ticket"""
+    verify_token(credentials.credentials)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/tickets/{ticket_id}",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.put("/support/tickets/{ticket_id}")
+async def update_support_ticket(ticket_id: int, request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Update support ticket"""
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('core')}/support/tickets/{ticket_id}",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        return response.json()
+
+@app.get("/support/tickets/{ticket_id}/messages")
+async def get_ticket_messages(ticket_id: int, include_internal: bool = False, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get ticket messages"""
+    verify_token(credentials.credentials)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/tickets/{ticket_id}/messages",
+            params={"include_internal": include_internal},
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.post("/support/tickets/{ticket_id}/messages")
+async def create_ticket_message(ticket_id: int, request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Create ticket message"""
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{service_registry.get_service_url('core')}/support/tickets/{ticket_id}/messages",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        return response.json()
+
+@app.get("/support/knowledge-base")
+async def get_knowledge_base(category: str = None, featured_only: bool = False):
+    """Get knowledge base articles (public)"""
+    async with httpx.AsyncClient() as client:
+        params = {}
+        if category:
+            params["category"] = category
+        if featured_only:
+            params["featured_only"] = featured_only
+            
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/knowledge-base",
+            params=params
+        )
+        return response.json()
+
+@app.get("/support/knowledge-base/{article_id}")
+async def get_knowledge_article(article_id: int):
+    """Get knowledge base article (public)"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/knowledge-base/{article_id}"
+        )
+        return response.json()
+
+@app.get("/support/dashboard")
+async def get_support_dashboard(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get support dashboard stats"""
+    verify_token(credentials.credentials)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/dashboard",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
+        )
+        return response.json()
+
+@app.get("/support/agent-dashboard")
+async def get_agent_dashboard(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get agent dashboard stats"""
+    verify_token(credentials.credentials)
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('core')}/support/agent-dashboard",
+            headers={"Authorization": f"Bearer {credentials.credentials}"}
         )
         return response.json()
 
@@ -194,7 +495,7 @@ async def create_crisis_alert(request: Request, current_user: dict = Depends(get
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('crisis')}/alerts",
+            f"{service_registry.get_service_url('core')}/crisis/alerts",
             content=body,
             headers={
                 "content-type": "application/json",
@@ -210,7 +511,7 @@ async def create_simulation(request: Request, current_user: dict = Depends(get_c
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('crisis')}/simulations",
+            f"{service_registry.get_service_url('core')}/crisis/simulations",
             content=body,
             headers={
                 "content-type": "application/json",
@@ -227,7 +528,7 @@ async def create_complaint(request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('maintenance')}/public/complaints",
+            f"{service_registry.get_service_url('core')}/maintenance/public/complaints",
             content=body,
             headers={"content-type": "application/json"}
         )
@@ -240,136 +541,22 @@ async def report_leak(request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{service_registry.get_service_url('monitoring')}/public/leak-reports",
+            f"{service_registry.get_service_url('core')}/monitoring/public/leak-reports",
             content=body,
             headers={"content-type": "application/json"}
         )
         return response.json()
 
 # Support service routes
-# Resolve Support Service base URL (prefer env var, fallback to service name inside Docker network)
-SUPPORT_SERVICE_BASE_URL = os.getenv("SUPPORT_SERVICE_URL", "http://support-service:8000")
 @app.get("/support/health")
 async def support_health_check():
     """Support service health check"""
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(f"{SUPPORT_SERVICE_BASE_URL}/health")
+            response = await client.get(f"{service_registry.get_service_url('core')}/health")
             return response.json()
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
-
-@app.get("/support/tickets")
-async def get_support_tickets(current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Get support tickets"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
-
-@app.post("/support/tickets/{ticket_id}/evaluate")
-async def evaluate_support_ticket(ticket_id: int, request: Request, current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Map evaluation from frontend to support service satisfaction endpoint"""
-    body = await request.json()
-    # Expecting { rating: number, comment: string }
-    payload = {
-        "satisfaction_rating": body.get("rating"),
-        "satisfaction_comment": body.get("comment")
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets/{ticket_id}/satisfaction",
-            json=payload,
-            headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {token}"
-            }
-        )
-        return response.json()
-
-@app.post("/support/tickets")
-async def create_support_ticket(request: Request, current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Create support ticket"""
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets",
-            content=body,
-            headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {token}"
-            }
-        )
-        return response.json()
-
-@app.get("/support/tickets/{ticket_id}")
-async def get_support_ticket(ticket_id: int, current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Get support ticket by ID"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets/{ticket_id}",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
-
-@app.get("/support/tickets/{ticket_id}/messages")
-async def get_ticket_messages(ticket_id: int, include_internal: bool = False, current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Proxy get ticket messages"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets/{ticket_id}/messages",
-            params={"include_internal": include_internal},
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
-
-@app.post("/support/tickets/{ticket_id}/messages")
-async def create_ticket_message(ticket_id: int, request: Request, current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Add message to support ticket"""
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{SUPPORT_SERVICE_BASE_URL}/tickets/{ticket_id}/messages",
-            content=body,
-            headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {token}"
-            }
-        )
-        return response.json()
-
-@app.get("/support/knowledge-base")
-async def get_knowledge_base():
-    """Get knowledge base articles"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/knowledge-base"
-        )
-        return response.json()
-
-@app.get("/support/dashboard")
-async def get_support_dashboard(current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Get support dashboard metrics"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/dashboard",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
-
-@app.get("/support/agent-dashboard")
-async def get_support_agent_dashboard(current_user: dict = Depends(get_current_user), token: str = Depends(get_bearer_token)):
-    """Get support agent specific dashboard metrics"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPPORT_SERVICE_BASE_URL}/agent-dashboard",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        return response.json()
 
 @app.post("/public/support/tickets")
 async def create_public_support_ticket(request: Request):
@@ -378,11 +565,53 @@ async def create_public_support_ticket(request: Request):
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{SUPPORT_SERVICE_BASE_URL}/public/tickets",
+            f"{service_registry.get_service_url('core')}/support/public/tickets",
             content=body,
             headers={"content-type": "application/json"}
         )
         return response.json()
+
+# Generic proxy function for easier routing
+async def proxy_request(request: Request, service: str, path: str):
+    """Generic proxy function to forward requests to core service"""
+    method = request.method
+    body = await request.body() if method in ["POST", "PUT", "PATCH"] else None
+    
+    # Get headers (preserve Authorization if present)
+    headers = {"content-type": "application/json"}
+    if "authorization" in [h.lower() for h in request.headers.keys()]:
+        headers["Authorization"] = request.headers.get("authorization")
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.request(
+            method=method,
+            url=f"{service_registry.get_service_url(service)}{path}",
+            content=body,
+            headers=headers,
+            params=dict(request.query_params)
+        )
+        return response.json()
+
+# Generic routes for any missing endpoints
+@app.api_route("/billing/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_billing_generic(request: Request, path: str):
+    """Generic proxy for billing routes"""
+    return await proxy_request(request, "core", f"/billing/{path}")
+
+@app.api_route("/support/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_support_generic(request: Request, path: str):
+    """Generic proxy for support routes"""
+    return await proxy_request(request, "core", f"/support/{path}")
+
+@app.api_route("/maintenance/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_maintenance_generic(request: Request, path: str):
+    """Generic proxy for maintenance routes"""
+    return await proxy_request(request, "core", f"/maintenance/{path}")
+
+@app.api_route("/monitoring/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_monitoring_generic(request: Request, path: str):
+    """Generic proxy for monitoring routes"""
+    return await proxy_request(request, "core", f"/monitoring/{path}")
 
 if __name__ == "__main__":
     import uvicorn

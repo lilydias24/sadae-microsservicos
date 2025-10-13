@@ -1,36 +1,30 @@
-version: "3.8"
-
 services:
+  # Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    depends_on:
+      - api-gateway
+    networks:
+      - sadae-network
   # API Gateway
   api-gateway:
-    build: ./services/api-gateway
-    ports:
-      - "8000:8000"
-      - "3002:3002" # Adicione esta porta para WebSocket
-    environment:
-      - SUPPORT_SERVICE_URL=http://support-service:8000
-      - AUTH_SERVICE_URL=http://auth-service:8001
-      - WS_PORT=3002
-    depends_on:
-      - support-service
-      - auth-service
-    networks:
-      - sadae-network
-
-  # Support Service
-  support-service:
     build:
-      context: .
-      dockerfile: ./services/support-service/Dockerfile
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
     ports:
-      - "8006:8000"
-    environment:
-      - SUPPORT_DATABASE_URL=postgresql://support_user:support_pass@support-db:5432/support_db
+      - "8080:8000"
     depends_on:
-      - support-db
+      - auth-service
+      - core-service
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - CORE_SERVICE_URL=http://core-service:8000
     networks:
       - sadae-network
-
   # Auth Service
   auth-service:
     build:
@@ -38,65 +32,89 @@ services:
       dockerfile: ./services/auth-service/Dockerfile
     ports:
       - "8001:8000"
-    environment:
-      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
-      - JWT_SECRET=your-secret-key
-      - ACCESS_TOKEN_EXPIRE_MINUTES=60
     depends_on:
       - auth-db
-    networks:
-      - sadae-network
-
-  # Databases
-
-  support-db:
-    image: postgres:15
     environment:
-      - POSTGRES_DB=support_db
-      - POSTGRES_USER=support_user
-      - POSTGRES_PASSWORD=support_pass
-    volumes:
-      - support_db_data:/var/lib/postgresql/data
+      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
     networks:
       - sadae-network
-
+  # Core Service
+  core-service:
+    build:
+      context: .
+      dockerfile: ./services/core-service/Dockerfile
+    ports:
+      - "8002:8000"
+    depends_on:
+      - core-db
+    environment:
+      - DATABASE_URL=postgresql://core_user:core_pass@core-db:5432/core_db
+    networks:
+      - sadae-network
+  # Monitoring Service
+  monitoring-service:
+    build:
+      context: .
+      dockerfile: ./services/monitoring-service/Dockerfile
+    ports:
+      - "8003:8002"
+    depends_on:
+      monitoring-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql://monitoring_user:monitoring_pass@monitoring-db:5432/monitoring_db
+      - REDIS_HOST=redis
+    networks:
+      - sadae-network
+    restart: on-failure
+  # Databases
   auth-db:
     image: postgres:15
     environment:
-      - POSTGRES_DB=auth_db
-      - POSTGRES_USER=auth_user
-      - POSTGRES_PASSWORD=auth_pass
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
     volumes:
-      - auth_db_data:/var/lib/postgresql/data
+      - auth_data:/var/lib/postgresql/data
     networks:
       - sadae-network
-
-  # Redis for caching and real-time data
+  core-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: core_db
+      POSTGRES_USER: core_user
+      POSTGRES_PASSWORD: core_pass
+    volumes:
+      - core_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+  monitoring-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: monitoring_db
+      POSTGRES_USER: monitoring_user
+      POSTGRES_PASSWORD: monitoring_pass
+    volumes:
+      - monitoring_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitoring_user -d monitoring_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     networks:
       - sadae-network
-
-  # Frontend Application
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8000
-    depends_on:
-      - api-gateway
-    networks:
-      - sadae-network
-
 volumes:
-  support_db_data:
-  auth_db_data:
-
+  auth_data:
+  core_data:
+  monitoring_data:
 networks:
-  sadae-network:
+  sadae-network:  
     driver: bridge

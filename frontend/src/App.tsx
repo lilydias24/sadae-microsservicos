@@ -7,11 +7,11 @@ import { Layout } from "./components/Layout"
 
 // Pages
 import { LoginPage } from "./pages/LoginPage"
-import { RegisterPage } from "./pages/RegisterPage"
 import { DashboardPage } from "./pages/DashboardPage"
-import { PublicServicesPage } from "./pages/PublicServicesPage"
+import { BillingPage } from "./pages/BillingPage"
+import { MaintenancePage } from "./pages/MaintenancePage"
+import { MonitoringPage } from "./pages/MonitoringPage"
 import { SupportPage } from "./pages/SupportPage"
-import { ProfilePage } from "./pages/ProfilePage"
 
 import "./index.css"
 
@@ -35,10 +35,8 @@ function App() {
               <Routes>
                 {/* Public routes */}
                 <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/public" element={<PublicServicesPage />} />
 
-                {/* Protected routes - common/public-focused */}
+                {/* Protected routes */}
                 <Route
                   path="/"
                   element={
@@ -60,21 +58,41 @@ function App() {
                   }
                 />
                 <Route
-                  path="/support/*"
+                  path="/billing/*"
                   element={
                     <ProtectedRoute>
                       <Layout>
-                        <SupportPage />
+                        <BillingPage />
                       </Layout>
                     </ProtectedRoute>
                   }
                 />
                 <Route
-                  path="/profile"
+                  path="/maintenance"
                   element={
                     <ProtectedRoute>
                       <Layout>
-                        <ProfilePage />
+                        <MaintenancePage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/monitoring"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MonitoringPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/support"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <SupportPage />
                       </Layout>
                     </ProtectedRoute>
                   }

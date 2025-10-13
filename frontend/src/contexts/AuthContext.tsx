@@ -1,130 +1,158 @@
-"use client";
+"use client"
 
-import type React from "react";
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  type ReactNode,
-} from "react";
-import { api } from "../services/api";
+import type React from "react"
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { api } from "../services/api"
 
 interface User {
-  user_id: number;
-  username: string;
-  email: string;
-  full_name: string;
-  role: string;
-  is_active: boolean;
-  phone?: string;
-  address?: string;
+  user_id: number
+  username: string
+  email: string
+  full_name: string
+  role: string
+  is_active: boolean
+  phone?: string
+  address?: string
 }
 
 interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  login: (username: string, password: string) => Promise<void>;
-  register: (userData: RegisterData) => Promise<void>;
-  logout: () => void;
-  updateUser: (userData: Partial<User>) => void;
-  isLoading: boolean;
+  user: User | null
+  token: string | null
+  login: (username: string, password: string) => Promise<void>
+  register: (userData: RegisterData) => Promise<void>
+  logout: () => void
+  updateUser: (userData: Partial<User>) => void
+  isLoading: boolean
 }
 
 interface RegisterData {
-  username: string;
-  email: string;
-  password: string;
-  full_name: string;
-  role: string;
+  username: string
+  email: string
+  password: string
+  full_name: string
+  role: string
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
+  const context = useContext(AuthContext)
   if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error("useAuth must be used within an AuthProvider")
   }
-  return context;
-};
+  return context
+}
 
 interface AuthProviderProps {
-  children: ReactNode;
+  children: ReactNode
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
-    const storedUser = localStorage.getItem("user");
+    const storedToken = localStorage.getItem("token")
+    const storedUser = localStorage.getItem("user")
 
     if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-      api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
+      setToken(storedToken)
+      setUser(JSON.parse(storedUser))
+      // Let the axios interceptor handle the Authorization header
     }
 
-    setIsLoading(false);
-  }, []);
+    setIsLoading(false)
+  }, [])
 
   const login = async (username: string, password: string) => {
     try {
+      // Call the real auth service API
       const response = await api.post("/auth/login", {
-        username,
-        password,
-      });
+        email: username, // LoginPage sends email as username
+        password: password
+      })
 
-      const { access_token, user: userData } = response.data;
+      const { access_token, user } = response.data
+      
+      // Update user structure to match frontend interface
+      const frontendUser: User = {
+        user_id: user.id,
+        username: user.email,
+        email: user.email,
+        full_name: user.name,
+        role: user.role,
+        is_active: user.is_active,
+        phone: undefined,
+        address: undefined
+      }
 
-      setToken(access_token);
-      setUser(userData);
+      setToken(access_token)
+      setUser(frontendUser)
 
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user", JSON.stringify(userData));
-
-      api.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(frontendUser))
+      
+      // Let the axios interceptor handle the Authorization header automatically
     } catch (error: any) {
-      console.error("Login error:", error.response?.data || error.message);
-      throw error;
+      console.error("Login error:", error)
+      throw error
     }
-  };
+  }
 
   const register = async (userData: RegisterData) => {
     try {
-      const response = await api.post("/auth/register", userData);
-      const { access_token, user: registeredUser } = response.data;
+      // Call the real auth service API
+      const response = await api.post("/auth/register", {
+        email: userData.email,
+        name: userData.full_name,
+        password: userData.password,
+        role: userData.role
+      })
 
-      setToken(access_token);
-      setUser(registeredUser);
+      const { access_token, user } = response.data
+      
+      // Update user structure to match frontend interface
+      const frontendUser: User = {
+        user_id: user.id,
+        username: user.email,
+        email: user.email,
+        full_name: user.name,
+        role: user.role,
+        is_active: user.is_active,
+        phone: undefined,
+        address: undefined
+      }
 
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user", JSON.stringify(registeredUser));
+      setToken(access_token)
+      setUser(frontendUser)
 
-      api.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
+      localStorage.setItem("token", access_token)
+      localStorage.setItem("user", JSON.stringify(frontendUser))
+      
+      // Let the axios interceptor handle the Authorization header automatically
+      
+      console.log("User registered successfully:", frontendUser)
     } catch (error: any) {
-      console.error("Register error:", error.response?.data || error.message);
-      throw error;
+      console.error("Registration error:", error)
+      throw error
     }
-  };
+  }
 
   const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-  };
+    setUser(null)
+    setToken(null)
+    localStorage.removeItem("token")
+    localStorage.removeItem("user")
+  }
 
   const updateUser = (userData: Partial<User>) => {
     if (user) {
-      const updatedUser = { ...user, ...userData };
-      setUser(updatedUser);
-      localStorage.setItem("user", JSON.stringify(updatedUser));
+      const updatedUser = { ...user, ...userData }
+      setUser(updatedUser)
+      localStorage.setItem("user", JSON.stringify(updatedUser))
     }
-  };
+  }
 
   const value = {
     user,
@@ -134,7 +162,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     logout,
     updateUser,
     isLoading,
-  };
+  }
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}

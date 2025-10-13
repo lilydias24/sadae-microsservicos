@@ -2,12 +2,22 @@
 
 import type React from "react"
 import { NavLink } from "react-router-dom"
-import { LayoutDashboard, CreditCard, MessageSquare, User, Droplets } from "lucide-react"
+import { LayoutDashboard, Activity, Wrench, CreditCard, AlertTriangle, MessageSquare, FileText, User, Droplets } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["all"] },
+  { name: "Monitoramento", href: "/monitoring", icon: Activity, roles: ["operator", "crisis_manager"] },
+  { name: "Manutenção", href: "/maintenance", icon: Wrench, roles: ["maintenance_manager", "operator"] },
+  { name: "Faturamento", href: "/billing", icon: CreditCard, roles: ["all"] },
+  { name: "Gestão de Crises", href: "/crisis", icon: AlertTriangle, roles: ["crisis_manager"] },
   { name: "Atendimento", href: "/support", icon: MessageSquare, roles: ["all"] },
+  {
+    name: "Relatórios",
+    href: "/reports",
+    icon: FileText,
+    roles: ["operator", "maintenance_manager", "financial_manager", "crisis_manager"],
+  },
   { name: "Perfil", href: "/profile", icon: User, roles: ["all"] },
 ]
 
