@@ -42,13 +42,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware - Configuração completa
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # broadened for local dev to avoid CORS blocks
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:8080", "*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 security = HTTPBearer()

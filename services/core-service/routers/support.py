@@ -23,7 +23,7 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import shared modules: {e}")
     # Create minimal fallbacks for development
-    async def verify_token(token):
+    def verify_token(token):
         return {"id": 1, "name": "Test User", "email": "test@test.com", "role": "citizen"}
     
     class UserRole:
@@ -64,7 +64,7 @@ async def verify_user_token(authorization: str) -> dict:
         )
     
     token = authorization.split(" ")[1]
-    user = await verify_token(token)
+    user = verify_token(token)  # ✅ Não é async
     return user
 
 def generate_ticket_number() -> str:

@@ -437,3 +437,47 @@ class LeakReport(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+
+class AuditLog(Base):
+    """
+    🔗 Registro de auditoria para Chain of Responsibility
+    
+    Armazena todas as decisões, processamentos e resultados das cadeias
+    para fins de auditoria, compliance e análise.
+    """
+    __tablename__ = "audit_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Identificação da ação
+    action = Column(String(50), nullable=False, index=True)  # AuditAction enum
+    chain_name = Column(String(100), nullable=False, index=True)
+    request_id = Column(String(100), nullable=False, index=True)
+    
+    # Entidades relacionadas
+    user_id = Column(Integer, nullable=True, index=True)
+    entity_type = Column(String(50), nullable=True, index=True)  # bill_contest, debt_negotiation, service_order
+    entity_id = Column(Integer, nullable=True, index=True)
+    
+    # Resultado do processamento
+    level = Column(String(20), nullable=False)  # info, warning, error, critical
+    decision = Column(String(100), nullable=True)  # approved, rejected, manual_review, etc.
+    score = Column(Float, nullable=True)  # Score de validação (se aplicável)
+    
+    # Detalhes do processamento
+    handler_sequence = Column(Text, nullable=True)  # JSON array dos handlers executados
+    input_data = Column(Text, nullable=True)  # JSON dos dados de entrada
+    output_data = Column(Text, nullable=True)  # JSON dos dados de saída
+    processing_time_ms = Column(Float, nullable=True)  # Tempo de processamento em ms
+    
+    # Metadata adicional
+    extra_data = Column(Text, nullable=True)  # JSON com dados adicionais
+    
+    # Índices para queries comuns
+    # __table_args__ = (
+    #     Index('idx_audit_user_action', 'user_id', 'action'),
+    #     Index('idx_audit_entity', 'entity_type', 'entity_id'),
+    #     Index('idx_audit_timestamp_action', 'timestamp', 'action'),
+    # )
+

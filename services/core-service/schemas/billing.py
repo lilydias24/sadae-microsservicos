@@ -109,8 +109,14 @@ class DebtNegotiationBase(BaseModel):
     discount_percentage: float = 0.0
     interest_rate: float = 0.0
 
-class DebtNegotiationCreate(DebtNegotiationBase):
-    pass
+class DebtNegotiationCreate(BaseModel):
+    
+    customer_id: int
+    installments: int
+    installment_amount: float = 0.0  # Opcional, será calculado
+    discount_percentage: float = 0.0  # Opcional, será calculado pela cadeia
+    interest_rate: float = 0.0  # Opcional, será calculado pela cadeia
+    down_payment: Optional[float] = 0.0  # Entrada/sinal
 
 class DebtNegotiationResponse(DebtNegotiationBase):
     id: int

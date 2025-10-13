@@ -11,9 +11,13 @@ logger = logging.getLogger(__name__)
 class UserRole(str, Enum):
     """User roles enumeration"""
     CITIZEN = "citizen"
+    OPERATOR = "operator"
     ADMIN = "admin"
     SUPPORT_AGENT = "support_agent"
     MANAGER = "manager"
+    MAINTENANCE_MANAGER = "maintenance_manager"
+    FINANCIAL_MANAGER = "financial_manager"
+    CRISIS_MANAGER = "crisis_manager"
 
 def generate_protocol_number() -> str:
     """Generate a unique protocol number"""

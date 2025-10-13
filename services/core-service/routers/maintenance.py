@@ -22,7 +22,7 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import shared modules: {e}")
     # Create minimal fallbacks for development
-    async def verify_token(token):
+    def verify_token(token):
         return {"id": 1, "name": "Test User", "email": "test@test.com", "role": "maintenance_manager"}
     
     class UserRole:
@@ -51,10 +51,29 @@ from schemas.maintenance import (
     ServiceOrderStatus, AlertLevel, ComplaintCategory, ComplaintStatus
 )
 
+# 🔗 Chain of Responsibility - Importar cadeia de processamento
+try:
+    from business.maintenance_chain import (
+        create_standard_service_order_chain,
+        create_emergency_only_chain,
+        ServiceOrderRequest,
+        ServiceOrderType as ChainServiceOrderType
+    )
+    CHAIN_ENABLED = True
+    print("✅ Chain of Responsibility habilitado para Maintenance")
+except ImportError as e:
+    print(f"⚠️ Chain of Responsibility não disponível: {e}")
+    CHAIN_ENABLED = False
+
 router = APIRouter()
 
 # Security
 security = HTTPBearer()
+
+# 🔗 Inicializar cadeias de processamento
+if CHAIN_ENABLED:
+    service_order_chain = create_standard_service_order_chain()
+    emergency_chain = create_emergency_only_chain()
 
 async def verify_user_token(authorization: str) -> dict:
     """Verify JWT token and return user info"""
@@ -65,7 +84,7 @@ async def verify_user_token(authorization: str) -> dict:
         )
     
     token = authorization.split(" ")[1]
-    user = await verify_token(token)
+    user = verify_token(token)  
     return user
 
 # Health check
@@ -87,7 +106,16 @@ async def create_service_order(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Create service order (maintenance manager only)"""
+    """
+    🔗 Create service order with Chain of Responsibility processing
+    
+    A cadeia processa automaticamente:
+    - Classificação por tipo (emergência tem prioridade)
+    - Avaliação de urgência e prioridade
+    - Alocação de equipe adequada
+    - Estimativa de recursos (tempo, materiais, custo)
+    - Auto-aprovação baseada em regras de negócio
+    """
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
     if user["role"] != UserRole.MAINTENANCE_MANAGER:
@@ -96,26 +124,111 @@ async def create_service_order(
             detail="Apenas gerentes de manutenção podem criar ordens de serviço"
         )
     
-    protocol_number = generate_protocol_number()
+    # 🔗 CHAIN OF RESPONSIBILITY - Processamento automático da ordem
+    processing_result = None
+    order_number = generate_protocol_number()
+    
+    if CHAIN_ENABLED:
+        try:
+            # Mapear tipo de ordem para enum da cadeia
+            type_map = {
+                "preventive": ChainServiceOrderType.PREVENTIVE,
+                "corrective": ChainServiceOrderType.CORRECTIVE,
+                "emergency": ChainServiceOrderType.EMERGENCY,
+                "installation": ChainServiceOrderType.INSTALLATION,
+                "inspection": ChainServiceOrderType.INSPECTION,
+                "meter_reading": ChainServiceOrderType.METER_READING,
+                "meter_replacement": ChainServiceOrderType.METER_REPLACEMENT,
+                "network_expansion": ChainServiceOrderType.NETWORK_EXPANSION
+            }
+            order_type = type_map.get(order_data.order_type, ChainServiceOrderType.CORRECTIVE)
+            
+            # Criar requisição para a cadeia
+            chain_request = ServiceOrderRequest(
+                order_type=order_type,
+                description=order_data.description,
+                location=order_data.location,
+                latitude=order_data.latitude,
+                longitude=order_data.longitude,
+                reported_issue=order_data.description,
+                affects_water_supply=getattr(order_data, 'affects_water_supply', False),
+                affects_multiple_customers=getattr(order_data, 'affects_multiple_customers', False),
+                estimated_affected_customers=getattr(order_data, 'estimated_affected_customers', 0),
+                has_safety_risk=getattr(order_data, 'has_safety_risk', False),
+                requires_street_closure=getattr(order_data, 'requires_street_closure', False),
+                requires_special_equipment=getattr(order_data, 'requires_special_equipment', False)
+            )
+            
+            # Processar na cadeia
+            processing_result = service_order_chain.handle(chain_request)
+            order_number = processing_result.data['order_number']
+            
+            print(f"🔗 Chain processing - Order: {order_number}, Priority: {processing_result.data['priority']}, Approved: {processing_result.data['approved']}")
+            
+        except Exception as e:
+            print(f"⚠️ Erro no processamento da cadeia: {e}")
+            # Em caso de erro, continua com processamento manual
+    
+    protocol_number = order_number
+    
+    # Usar dados processados pela cadeia ou valores padrão
+    if processing_result and processing_result.success:
+        # Dados da cadeia
+        assigned_team = processing_result.data.get('assigned_team')
+        estimated_cost = processing_result.data.get('estimated_cost', 0)
+        estimated_duration = processing_result.data.get('estimated_duration_hours', 0)
+        max_response_time = processing_result.data.get('max_response_time_hours', 24)
+        auto_approved = processing_result.data.get('approved', False)
+        processing_notes = processing_result.data.get('notes', [])
+        
+        # Mapear prioridade da cadeia para o modelo
+        chain_priority = processing_result.data.get('priority', 'medium')
+        priority_map = {
+            'critical': AlertLevel.CRITICAL,
+            'urgent': AlertLevel.HIGH,
+            'high': AlertLevel.HIGH,
+            'medium': AlertLevel.MEDIUM,
+            'low': AlertLevel.LOW
+        }
+        calculated_priority = priority_map.get(chain_priority, AlertLevel.MEDIUM)
+    else:
+        # Valores padrão
+        assigned_team = None
+        estimated_cost = 0
+        estimated_duration = 0
+        max_response_time = 24
+        auto_approved = False
+        processing_notes = []
+        calculated_priority = order_data.priority
     
     service_order = ServiceOrder(
         title=order_data.title,
         description=order_data.description,
-        priority=order_data.priority,
+        priority=calculated_priority,
         location=order_data.location,
         anomaly_id=order_data.anomaly_id,
         protocol_number=protocol_number,
         created_by=user["id"],
         created_by_name=user["name"],
-        status=ServiceOrderStatus.OPEN
+        status=ServiceOrderStatus.OPEN if not auto_approved else ServiceOrderStatus.ASSIGNED,
+        assigned_team=assigned_team,
+        estimated_cost=estimated_cost,
+        estimated_duration_hours=estimated_duration
     )
+    
+    # Adicionar notas de processamento
+    if processing_notes:
+        service_order.notes = "\n".join([f"🔗 {note}" for note in processing_notes])
     
     db.add(service_order)
     db.commit()
     db.refresh(service_order)
     
     # Send notification to available teams
-    background_tasks.add_task(notify_available_teams, service_order)
+    if assigned_team:
+        background_tasks.add_task(notify_specific_team, service_order, assigned_team)
+    else:
+        background_tasks.add_task(notify_available_teams, service_order)
     
     return service_order
 
@@ -448,6 +561,18 @@ async def notify_available_teams(service_order: ServiceOrder):
         print(f"Notifying teams about new service order: {service_order.protocol_number}")
         # This would typically send notifications to team mobile apps or email
         # Implementation would depend on notification service
+    except Exception as e:
+        print(f"Error sending team notification: {e}")
+
+async def notify_specific_team(service_order: ServiceOrder, team_name: str):
+    """🔗 Notify specific team assigned by Chain of Responsibility"""
+    try:
+        print(f"🔗 Notifying team '{team_name}' about new service order: {service_order.protocol_number}")
+        print(f"   Priority: {service_order.priority}")
+        print(f"   Estimated duration: {service_order.estimated_duration_hours}h")
+        print(f"   Estimated cost: R$ {service_order.estimated_cost:.2f}")
+        # TODO: Integrar com notification_chain para envio multi-canal
+        # from notification_chain import create_full_notification_chain, NotificationRequest
     except Exception as e:
         print(f"Error sending team notification: {e}")
 
