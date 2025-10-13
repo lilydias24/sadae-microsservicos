@@ -50,11 +50,16 @@ app.add_middleware(
 
 security = HTTPBearer()
 
+def _build_auth_header(token: str) -> dict:
+    """Helper to build Authorization header"""
+    return {"Authorization": f"Bearer {token}"}
+
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify JWT token and get current user"""
+    """Verify JWT token and capture token for downstream services"""
     token = credentials.credentials
     payload = verify_token(token)
-    return payload
+    return {"token": token, "claims": payload}
 
 @app.get("/")
 async def root():
@@ -108,24 +113,57 @@ async def register(request: Request):
         )
         return response.json()
 
+
+@app.get("/me")
+async def get_profile(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Fetch current user profile via auth service"""
+    token = credentials.credentials
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('auth')}/me",
+            headers=_build_auth_header(token)
+        )
+        return response.json()
+
+
+@app.put("/me")
+async def update_profile(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Update current user profile via auth service"""
+    token = credentials.credentials
+    body = await request.body()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('auth')}/me",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                **_build_auth_header(token)
+            }
+        )
+        return response.json()
+
 # Monitoring routes
 @app.get("/monitoring/sensors")
 async def get_sensors(current_user: dict = Depends(get_current_user)):
     """Get all sensors data"""
+    token = current_user["token"]
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('core')}/monitoring/sensors",
-            headers={"Authorization": f"Bearer {current_user}"}
+            headers=_build_auth_header(token)
         )
         return response.json()
 
 @app.get("/monitoring/readings/realtime")
 async def get_realtime_readings(current_user: dict = Depends(get_current_user)):
     """Get real-time sensor readings"""
+    token = current_user["token"]
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('core')}/monitoring/readings/realtime",
-            headers={"Authorization": f"Bearer {current_user}"}
+            headers=_build_auth_header(token)
         )
         return response.json()
 
@@ -133,6 +171,7 @@ async def get_realtime_readings(current_user: dict = Depends(get_current_user)):
 async def create_anomaly(request: Request, current_user: dict = Depends(get_current_user)):
     """Create anomaly alert"""
     body = await request.body()
+    token = current_user["token"]
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -140,7 +179,7 @@ async def create_anomaly(request: Request, current_user: dict = Depends(get_curr
             content=body,
             headers={
                 "content-type": "application/json",
-                "Authorization": f"Bearer {current_user}"
+                **_build_auth_header(token)
             }
         )
         return response.json()
@@ -149,10 +188,11 @@ async def create_anomaly(request: Request, current_user: dict = Depends(get_curr
 @app.get("/maintenance/orders")
 async def get_service_orders(current_user: dict = Depends(get_current_user)):
     """Get service orders"""
+    token = current_user["token"]
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{service_registry.get_service_url('core')}/maintenance/orders",
-            headers={"Authorization": f"Bearer {current_user}"}
+            headers=_build_auth_header(token)
         )
         return response.json()
 
@@ -160,6 +200,7 @@ async def get_service_orders(current_user: dict = Depends(get_current_user)):
 async def create_service_order(request: Request, current_user: dict = Depends(get_current_user)):
     """Create service order"""
     body = await request.body()
+    token = current_user["token"]
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -167,7 +208,7 @@ async def create_service_order(request: Request, current_user: dict = Depends(ge
             content=body,
             headers={
                 "content-type": "application/json",
-                "Authorization": f"Bearer {current_user}"
+                **_build_auth_header(token)
             }
         )
         return response.json()
@@ -471,6 +512,7 @@ async def get_agent_dashboard(credentials: HTTPAuthorizationCredentials = Depend
 async def create_crisis_alert(request: Request, current_user: dict = Depends(get_current_user)):
     """Create crisis alert"""
     body = await request.body()
+    token = current_user["token"]
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -478,7 +520,7 @@ async def create_crisis_alert(request: Request, current_user: dict = Depends(get
             content=body,
             headers={
                 "content-type": "application/json",
-                "Authorization": f"Bearer {current_user}"
+                **_build_auth_header(token)
             }
         )
         return response.json()
@@ -487,6 +529,7 @@ async def create_crisis_alert(request: Request, current_user: dict = Depends(get
 async def create_simulation(request: Request, current_user: dict = Depends(get_current_user)):
     """Create crisis simulation"""
     body = await request.body()
+    token = current_user["token"]
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -494,7 +537,7 @@ async def create_simulation(request: Request, current_user: dict = Depends(get_c
             content=body,
             headers={
                 "content-type": "application/json",
-                "Authorization": f"Bearer {current_user}"
+                **_build_auth_header(token)
             }
         )
         return response.json()

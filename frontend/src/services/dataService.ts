@@ -13,6 +13,7 @@ export interface Bill {
   created_at: string
   period_start: string
   period_end: string
+  originalId?: number
 }
 
 export interface BillDispute {
@@ -92,7 +93,8 @@ class DataService {
       status: apiBill.status,
       created_at: apiBill.created_at,
       period_start: apiBill.billing_period_start.split('T')[0],
-      period_end: apiBill.billing_period_end.split('T')[0]
+      period_end: apiBill.billing_period_end.split('T')[0],
+      originalId: apiBill.id
     }
   }
 

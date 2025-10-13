@@ -58,19 +58,27 @@ class ServiceRegistry:
     """Service registry for microservices communication"""
     
     def __init__(self):
+        core_service_url = os.getenv("CORE_SERVICE_URL", "http://core-service:8002")
         self.services = {
             "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001"),
-            "monitoring": os.getenv("MONITORING_SERVICE_URL", "http://monitoring-service:8002"),
-            "maintenance": os.getenv("MAINTENANCE_SERVICE_URL", "http://maintenance-service:8003"),
-            "billing": os.getenv("BILLING_SERVICE_URL", "http://billing-service:8004"),
-            "crisis": os.getenv("CRISIS_SERVICE_URL", "http://crisis-service:8005"),
-            "support": os.getenv("SUPPORT_SERVICE_URL", "http://support-service:8006"),
+            "core": core_service_url,
+            "monitoring": os.getenv("MONITORING_SERVICE_URL", core_service_url),
+            "maintenance": os.getenv("MAINTENANCE_SERVICE_URL", core_service_url),
+            "billing": os.getenv("BILLING_SERVICE_URL", core_service_url),
+            "crisis": os.getenv("CRISIS_SERVICE_URL", core_service_url),
+            "support": os.getenv("SUPPORT_SERVICE_URL", core_service_url),
             "notification": os.getenv("NOTIFICATION_SERVICE_URL", "http://notification-service:8007"),
         }
     
     def get_service_url(self, service_name: str) -> str:
         """Get service URL by name"""
-        return self.services.get(service_name)
+        url = self.services.get(service_name)
+
+        if url is None and service_name != "core":
+            # Fallback to core service for domain-specific modules that reside there
+            url = self.services.get("core")
+
+        return url
 
 # Global service registry instance
 service_registry = ServiceRegistry()
