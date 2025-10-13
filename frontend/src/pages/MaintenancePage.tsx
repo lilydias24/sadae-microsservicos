@@ -68,9 +68,9 @@ export function MaintenancePage() {
   })
 
   // Extrair dados das respostas da API
-  const workOrders = Array.isArray(workOrdersResponse?.data) ? workOrdersResponse.data : []
-  const teams = Array.isArray(teamsResponse?.data) ? teamsResponse.data : []
-  const complaints = Array.isArray(complaintsResponse?.data) ? complaintsResponse.data : []
+  const workOrders = workOrdersResponse && Array.isArray(workOrdersResponse.data) ? workOrdersResponse.data : []
+  const teams = teamsResponse && Array.isArray(teamsResponse.data) ? teamsResponse.data : []
+  const complaints = complaintsResponse && Array.isArray(complaintsResponse.data) ? complaintsResponse.data : []
 
   // Mutations para criar e atualizar ordens
   const createOrderMutation = useMutation({

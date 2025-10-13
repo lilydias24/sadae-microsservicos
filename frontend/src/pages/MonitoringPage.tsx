@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { monitoringDev } from "../services/monitoringService"
+import { useWebSocket } from "../contexts/WebSocketContext"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 
 // --- INTERFACES (mantidas para estrutura) ---
@@ -49,6 +50,7 @@ const mockRealtimeChartData = Array.from({ length: 50 }, (_, i) => ({
 
 export function MonitoringPage() {
   const [selectedSensorType, setSelectedSensorType] = useState<string>("all")
+  const { sensorData, alerts, isConnected, lastMessage } = useWebSocket()
 
   // Estado vindo do backend, com fallback para mocks
   const [realtimeData, setRealtimeData] = useState<any[]>([])
@@ -56,38 +58,58 @@ export function MonitoringPage() {
   const [anomaliesLimit, setAnomaliesLimit] = useState<number>(20)
   const [isUpdating, setIsUpdating] = useState<number | null>(null)
 
+  // Carregar dados iniciais (apenas uma vez)
   useEffect(() => {
-    let cancelled = false
-    const load = async () => {
+    const loadInitialData = async () => {
       try {
         const [hist, an] = await Promise.all([
           monitoringDev.getHistory({ sensor_id: "PRESS_001", limit: 50 }),
           monitoringDev.getAnomalies({ status: "pending", limit: anomaliesLimit }),
         ])
-        if (!cancelled) {
-          const readings = Array.isArray(hist.data.readings) ? hist.data.readings : []
-          const series = readings
-            .filter((r: any) => r.sensor_id === "PRESS_001")
-            .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-            .map((r: any) => ({ value: Number(r.value), timestamp: r.timestamp }))
-          setRealtimeData(series)
-          setAnomalies({ data: an.data?.map((a: any) => ({
-            id: String(a.id),
-            sensor_id: a.sensor_id,
-            description: a.description,
-            severity: a.severity,
-            status: a.status,
-            created_at: a.created_at,
-          })) ?? [] })
-        }
-      } catch {
-        // Fallback já está nos estados iniciais (mocks)
+        const readings = Array.isArray(hist.data.readings) ? hist.data.readings : []
+        const series = readings
+          .filter((r: any) => r.sensor_id === "PRESS_001")
+          .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .map((r: any) => ({ value: Number(r.value), timestamp: r.timestamp }))
+        setRealtimeData(series)
+        setAnomalies({ data: an.data?.map((a: any) => ({
+          id: String(a.id),
+          sensor_id: a.sensor_id,
+          description: a.description,
+          severity: a.severity,
+          status: a.status,
+          created_at: a.created_at,
+        })) ?? [] })
+        console.log("✅ Monitoring: Dados iniciais carregados")
+      } catch (error) {
+        console.log("❌ Monitoring: Erro ao carregar dados iniciais:", error)
       }
     }
-    load()
-    const interval = setInterval(load, 5000)
-    return () => { cancelled = true; clearInterval(interval) }
+    loadInitialData()
   }, [])
+
+  // Processar dados do WebSocket em tempo real
+  useEffect(() => {
+    if (lastMessage && lastMessage.type === "sensor_reading") {
+      const reading = lastMessage.data
+      console.log("📡 WebSocket: Nova leitura recebida!", reading)
+      
+      // Atualizar gráfico em tempo real
+      setRealtimeData(prev => {
+        const newData = [...prev, { value: Number(reading.value), timestamp: reading.timestamp }]
+        // Manter apenas as últimas 50 leituras
+        return newData.slice(-50)
+      })
+    }
+    
+    if (lastMessage && lastMessage.type === "anomaly_detected") {
+      console.log("⚠️ WebSocket: Nova anomalia detectada!", lastMessage.data)
+      // Adicionar anomalia à lista
+      setAnomalies(prev => ({
+        data: [lastMessage.data, ...prev.data]
+      }))
+    }
+  }, [lastMessage])
 
   const handleAnomalyAction = async (id: number, action: "confirm" | "resolve") => {
     try {

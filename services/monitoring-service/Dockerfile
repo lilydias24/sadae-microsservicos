@@ -16,8 +16,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/monitoring-service/ .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["./start.sh"]
 
 

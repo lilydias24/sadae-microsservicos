@@ -17,28 +17,34 @@ export const DashboardPage: React.FC = () => {
   // Estados para dados do sensor simulator
   const [realtimeReadings, setRealtimeReadings] = useState<any[]>([])
 
-  // Buscar dados do sensor simulator
+  // Carregar dados iniciais via HTTP (apenas uma vez)
   useEffect(() => {
-    let cancelled = false
-    const loadSensorData = async () => {
+    const loadInitialData = async () => {
       try {
-        console.log("🔍 Buscando dados do sensor simulator...")
+        console.log("🔍 Carregando dados iniciais dos sensores...")
         const realtime = await monitoringDev.getRealtimeReadings()
-        console.log("📊 Dados recebidos:", realtime.data)
-        if (!cancelled) {
-          const readings = realtime.data?.readings || []
-          console.log("✅ Definindo readings:", readings.length, "sensores")
-          setRealtimeReadings(readings)
-        }
+        const readings = realtime.data?.readings || []
+        console.log("✅ Dados iniciais carregados:", readings.length, "sensores")
+        setRealtimeReadings(readings)
       } catch (error) {
-        console.log("❌ Erro ao carregar dados dos sensores:", error)
+        console.log("❌ Erro ao carregar dados iniciais:", error)
       }
     }
     
-    loadSensorData()
-    const interval = setInterval(loadSensorData, 5000)
-    return () => { cancelled = true; clearInterval(interval) }
+    loadInitialData()
   }, [])
+
+  // Atualizar com dados do WebSocket em tempo real
+  useEffect(() => {
+    if (sensorData && sensorData.length > 0) {
+      console.log("📡 WebSocket: Atualizando dados em tempo real!", sensorData.length, "leituras")
+      setRealtimeReadings(prev => {
+        // Adicionar novas leituras do WebSocket
+        const newReadings = [...sensorData]
+        return newReadings
+      })
+    }
+  }, [sensorData])
 
   // Financial data queries for financial_manager role
   const { data: bills = [] } = useQuery({
