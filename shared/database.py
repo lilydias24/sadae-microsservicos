@@ -1,20 +1,36 @@
-import os
 from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import os
+
+# Create the declarative base for all models
+Base = declarative_base()
 
 def get_database_url(service_name: str) -> str:
-    # Ex: DATABASE_URL_MONITORING ou fallback para SQLite
-    env_key = f"DATABASE_URL_{service_name.upper()}"
-    url = os.getenv(env_key)
-    if url:
-        return url
-    return f"sqlite:///./{service_name}.db"
+    """Get database URL from environment variables"""
+    return os.getenv("DATABASE_URL", f"postgresql://user:password@localhost:5432/{service_name}_db")
 
 def create_database_engine(database_url: str):
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, echo=False, future=True, connect_args=connect_args)
+    """Create database engine"""
+    engine = create_engine(database_url)
+    return engine
 
 def get_session_local(engine):
-    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    """Create session local"""
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SessionLocal
 
+def get_db(SessionLocal):
+    """Dependency to get database session"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
+def get_db_session(service_name: str):
+    """Get database session for background tasks"""
+    database_url = get_database_url(service_name)
+    engine = create_database_engine(database_url)
+    SessionLocal = get_session_local(engine)
+    return SessionLocal()

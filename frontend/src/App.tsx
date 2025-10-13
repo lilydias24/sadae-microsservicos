@@ -8,7 +8,10 @@ import { Layout } from "./components/Layout"
 // Pages
 import { LoginPage } from "./pages/LoginPage"
 import { DashboardPage } from "./pages/DashboardPage"
+import { BillingPage } from "./pages/BillingPage"
+import { MaintenancePage } from "./pages/MaintenancePage"
 import { MonitoringPage } from "./pages/MonitoringPage"
+import { SupportPage } from "./pages/SupportPage"
 
 import "./index.css"
 
@@ -32,6 +35,7 @@ function App() {
               <Routes>
                 {/* Public routes */}
                 <Route path="/login" element={<LoginPage />} />
+
                 {/* Protected routes */}
                 <Route
                   path="/"
@@ -54,11 +58,41 @@ function App() {
                   }
                 />
                 <Route
-                  path="/monitoring/*"
+                  path="/billing/*"
                   element={
-                    <ProtectedRoute allowedRoles={["operator", "crisis_manager"]}>
+                    <ProtectedRoute>
+                      <Layout>
+                        <BillingPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/maintenance"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MaintenancePage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/monitoring"
+                  element={
+                    <ProtectedRoute>
                       <Layout>
                         <MonitoringPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/support"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <SupportPage />
                       </Layout>
                     </ProtectedRoute>
                   }
