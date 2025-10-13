@@ -1,0 +1,71 @@
+services:
+  # Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    depends_on:
+      - api-gateway
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8000"
+    depends_on:
+      - auth-service
+      - core-service
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - CORE_SERVICE_URL=http://core-service:8002
+
+  # Auth Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
+    ports:
+      - "8001:8000"
+    depends_on:
+      - auth-db
+    environment:
+      - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
+
+  # Core Service
+  core-service:
+    build:
+      context: .
+      dockerfile: ./services/core-service/Dockerfile
+    ports:
+      - "8002:8000"
+    depends_on:
+      - core-db
+    environment:
+      - DATABASE_URL=postgresql://core_user:core_pass@core-db:5432/core_db
+
+  # Databases
+  auth-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
+    volumes:
+      - auth_data:/var/lib/postgresql/data
+
+  core-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: core_db
+      POSTGRES_USER: core_user
+      POSTGRES_PASSWORD: core_pass
+    volumes:
+      - core_data:/var/lib/postgresql/data
+
+volumes:
+  auth_data:
+  core_data:
