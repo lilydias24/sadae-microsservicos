@@ -4,7 +4,7 @@ import axios from "axios"
 const resolvedBaseURL =
   (typeof process !== "undefined" && (process as any).env?.REACT_APP_API_URL) ||
   (typeof window !== "undefined" && (window as any).__RUNTIME_CONFIG__?.API_URL) ||
-  "http://localhost:8000"
+  "http://localhost:8080"
 
 export const api = axios.create({
   baseURL: resolvedBaseURL,

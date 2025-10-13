@@ -21,15 +21,18 @@ except ImportError as e:
     
     # Fallback service registry
     class ServiceRegistry:
+        def __init__(self):
+            self.services = {
+            "auth": os.getenv("AUTH_SERVICE_URL", "http://auth-service:8000"),  
+            "core": os.getenv("CORE_SERVICE_URL", "http://core-service:8000")   
+        }
+    
         def get_service_url(self, service_name: str) -> str:
-            fallback_urls = {
-                "auth": "http://auth-service:8001",
-                "core": "http://core-service:8002"
-            }
-            # Map all core services to the same URL
-            if service_name in ["billing", "support", "maintenance", "monitoring", "crisis"]:
-                return fallback_urls.get("core", "http://localhost:8002")
-            return fallback_urls.get(service_name, "http://localhost:8000")
+            """Get service URL by name"""
+        # ✅ Mapear todos os módulos para core service
+            if service_name in ["billing", "support", "maintenance", "monitoring"]:
+                return self.services.get("core")
+            return self.services.get(service_name, "http://localhost:8000")
     
     service_registry = ServiceRegistry()
 
@@ -87,13 +90,31 @@ async def login(request: Request):
     """Proxy login request to auth service"""
     body = await request.body()
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{service_registry.get_service_url('auth')}/login",
-            content=body,
-            headers={"content-type": "application/json"}
-        )
-        return response.json()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying login to: {auth_url}/login")
+            
+            response = await client.post(
+                f"{auth_url}/login",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {e}")
 
 @app.post("/auth/register")
 async def register(request: Request):

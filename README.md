@@ -15,3 +15,11 @@ O Sistema SADAE é uma aplicação web full-stack desenvolvida para gerenciar se
 - ✅ Validações e tratamento de erros
 - 🔄 Backend em desenvolvimento
 - 🔄 Integração com API real (usando mock data)
+
+## Comandos
+- docker-compose up --build -d - construir o sistema
+- docker exec rpiv_project04-auth-service-1 python seed_data.py - carregar os usuarios para o banco de dados
+
+## Usuario
+- email: operador@sadae.com
+- senha: operador123
