@@ -26,7 +26,11 @@ def seed_all_data():
         seed_maintenance_data(db)
         # Seed monitoring data
         seed_monitoring_data(db)
-        
+        # Seed teams data
+        seed_teams_data(db)
+        # Seed complaints data
+        seed_complaints_data(db)
+    
         db.commit()
         print("✅ All core service data seeded successfully")
     except Exception as e:
@@ -35,6 +39,96 @@ def seed_all_data():
         raise
     finally:
         db.close()
+
+def seed_teams_data(db):
+    """Seed teams data"""
+    teams = [
+        Team(
+            name="Equipe Hidráulica A",
+            description="Especializada em reparos de tubulação",
+            specialization="plumbing",
+            members_count=4,
+            max_concurrent_orders=3,
+            supervisor_name="João Silva",
+            supervisor_contact="(11) 99999-1111",
+            is_active=True
+        ),
+        Team(
+            name="Equipe Elétrica B",
+            description="Especializada em sistemas elétricos",
+            specialization="electrical",
+            members_count=3,
+            max_concurrent_orders=2,
+            supervisor_name="Maria Santos",
+            supervisor_contact="(11) 99999-2222",
+            is_active=True
+        ),
+        Team(
+            name="Equipe Geral C",
+            description="Manutenção geral e emergências",
+            specialization="general",
+            members_count=5,
+            max_concurrent_orders=4,
+            supervisor_name="Pedro Costa",
+            supervisor_contact="(11) 99999-3333",
+            is_active=True
+        )
+    ]
+    
+    for team in teams:
+        existing = db.query(Team).filter(Team.name == team.name).first()
+        if not existing:
+            db.add(team)
+
+def seed_complaints_data(db):
+    """Seed complaints data"""
+    from datetime import datetime
+    from shared.utils import generate_protocol_number
+    
+    complaints = [
+        Complaint(
+            protocol_number=generate_protocol_number(),
+            title="Vazamento na Rua das Flores",
+            description="Há um vazamento de água na calçada em frente ao número 123",
+            category="water_leak",
+            location="Rua das Flores, 123",
+            citizen_name="Ana Silva",
+            citizen_contact="(11) 98888-1111",
+            citizen_email="ana@email.com",
+            urgency_level="high",
+            status="pending"
+        ),
+        Complaint(
+            protocol_number=generate_protocol_number(),
+            title="Baixa pressão da água",
+            description="A pressão da água está muito baixa no bairro",
+            category="pressure_issue",
+            location="Bairro Centro",
+            citizen_name="Carlos Santos",
+            citizen_contact="(11) 98888-2222",
+            citizen_email="carlos@email.com",
+            urgency_level="medium",
+            status="assigned",
+            assigned_to="Equipe Hidráulica A"
+        ),
+        Complaint(
+            protocol_number=generate_protocol_number(),
+            title="Água com gosto estranho",
+            description="A água está com gosto e cheiro estranhos",
+            category="quality_issue",
+            location="Rua da Paz, 456",
+            citizen_name="Mariana Lima",
+            citizen_contact="(11) 98888-3333",
+            citizen_email="mariana@email.com",
+            urgency_level="medium",
+            status="in_progress"
+        )
+    ]
+    
+    for complaint in complaints:
+        existing = db.query(Complaint).filter(Complaint.protocol_number == complaint.protocol_number).first()
+        if not existing:
+            db.add(complaint)
 
 def seed_billing_data(db):
     """Seed billing data"""

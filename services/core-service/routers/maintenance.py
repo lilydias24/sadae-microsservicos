@@ -22,7 +22,7 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import shared modules: {e}")
     # Create minimal fallbacks for development
-    async def verify_token(token):
+    def verify_token(token):
         return {"id": 1, "name": "Test User", "email": "test@test.com", "role": "maintenance_manager"}
     
     class UserRole:
@@ -56,18 +56,28 @@ router = APIRouter()
 # Security
 security = HTTPBearer()
 
-async def verify_user_token(authorization: str) -> dict:
-    """Verify JWT token and return user info"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token não fornecido"
-        )
+async def verify_user_token(token: str):
+    """Verify user token and return user data"""
+    try:
+        # ✅ IMPORTANTE: verify_token NÃO é async, então NÃO usar await
+        payload = verify_token(token.replace("Bearer ", ""))
+        
+        # Extrair dados do payload
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        
+        return {
+            "id": int(user_id),
+            "email": payload.get("email", ""),
+            "role": payload.get("role", "user")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Token verification error: {e}")
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
     
-    token = authorization.split(" ")[1]
-    user = await verify_token(token)
-    return user
-
 # Health check
 @router.get("/health")
 async def health_check():
@@ -130,24 +140,34 @@ async def get_service_orders(
     db: Session = Depends(get_db)
 ):
     """Get service orders with filters"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
-    
-    query = db.query(ServiceOrder)
-    
-    # Apply user role filters
-    if user["role"] == UserRole.CITIZEN:
-        query = query.filter(ServiceOrder.created_by == user["id"])
-    
-    # Apply filters
-    if status:
-        query = query.filter(ServiceOrder.status == status)
-    if priority:
-        query = query.filter(ServiceOrder.priority == priority)
-    if team:
-        query = query.filter(ServiceOrder.assigned_team == team)
-    
-    orders = query.order_by(desc(ServiceOrder.created_at)).offset(skip).limit(limit).all()
-    return orders
+    try:
+        # ✅ Esta função JÁ É async, então pode usar await
+        user = await verify_user_token(f"Bearer {credentials.credentials}")
+        
+        # Query principal
+        query = db.query(ServiceOrder)
+        
+        # Aplicar filtros
+        if status:
+            query = query.filter(ServiceOrder.status == status)
+        if priority:
+            query = query.filter(ServiceOrder.priority == priority)
+        if team:
+            query = query.filter(ServiceOrder.assigned_team == team)
+        
+        # Executar query
+        orders = query.offset(skip).limit(limit).all()
+        
+        return orders
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_service_orders: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+
 
 @router.get("/orders/{order_id}", response_model=ServiceOrderResponse)
 async def get_service_order(
@@ -318,21 +338,29 @@ async def get_complaints(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Get complaints (staff only)"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
-    
-    if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
-    
-    query = db.query(Complaint)
-    
-    if status:
-        query = query.filter(Complaint.status == status)
-    if category:
-        query = query.filter(Complaint.category == category)
-    
-    complaints = query.order_by(desc(Complaint.created_at)).offset(skip).limit(limit).all()
-    return complaints
+    """Get maintenance complaints"""
+    try:
+        user = await verify_user_token(f"Bearer {credentials.credentials}")
+        
+        # Verificar permissões
+        if user["role"] not in ["operator", "maintenance_manager"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+        
+        query = db.query(Complaint)
+        
+        if status:
+            query = query.filter(Complaint.status == status)
+        if category:
+            query = query.filter(Complaint.category == category)
+        
+        complaints = query.offset(skip).limit(limit).all()
+        return complaints
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_complaints: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ==================== TEAM MANAGEMENT ====================
 
@@ -380,23 +408,30 @@ async def get_teams(
     db: Session = Depends(get_db)
 ):
     """Get maintenance teams"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
-    
-    query = db.query(Team)
-    if active_only:
-        query = query.filter(Team.is_active == True)
-    
-    teams = query.offset(skip).limit(limit).all()
-    
-    # Calculate current workload for each team
-    for team in teams:
-        current_workload = db.query(ServiceOrder).filter(
-            ServiceOrder.assigned_team == team.name,
-            ServiceOrder.status.in_([ServiceOrderStatus.ASSIGNED, ServiceOrderStatus.IN_PROGRESS])
-        ).count()
-        team.current_workload = current_workload
-    
-    return teams
+    try:
+        user = await verify_user_token(f"Bearer {credentials.credentials}")
+        
+        query = db.query(Team)
+        if active_only:
+            query = query.filter(Team.is_active == True)
+        
+        teams = query.offset(skip).limit(limit).all()
+        
+        # Calculate current workload for each team
+        for team in teams:
+            current_workload = db.query(ServiceOrder).filter(
+                ServiceOrder.assigned_team == team.name,
+                ServiceOrder.status.in_([ServiceOrderStatus.ASSIGNED, ServiceOrderStatus.IN_PROGRESS])
+            ).count()
+            team.current_workload = current_workload
+        
+        return teams
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_teams: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ==================== DASHBOARD & METRICS ====================
 
