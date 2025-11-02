@@ -8,7 +8,8 @@ services:
       - REACT_APP_API_URL=http://localhost:8080
     depends_on:
       - api-gateway
-
+    networks:
+      - sadae-network
   # API Gateway
   api-gateway:
     build:
@@ -20,9 +21,10 @@ services:
       - auth-service
       - core-service
     environment:
-      - AUTH_SERVICE_URL=http://auth-service:8001
-      - CORE_SERVICE_URL=http://core-service:8002
-
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - CORE_SERVICE_URL=http://core-service:8000
+    networks:
+      - sadae-network
   # Auth Service
   auth-service:
     build:
@@ -34,7 +36,8 @@ services:
       - auth-db
     environment:
       - DATABASE_URL=postgresql://auth_user:auth_pass@auth-db:5432/auth_db
-
+    networks:
+      - sadae-network
   # Core Service
   core-service:
     build:
@@ -46,7 +49,26 @@ services:
       - core-db
     environment:
       - DATABASE_URL=postgresql://core_user:core_pass@core-db:5432/core_db
-
+    networks:
+      - sadae-network
+  # Monitoring Service
+  monitoring-service:
+    build:
+      context: .
+      dockerfile: ./services/monitoring-service/Dockerfile
+    ports:
+      - "8003:8002"
+    depends_on:
+      monitoring-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql://monitoring_user:monitoring_pass@monitoring-db:5432/monitoring_db
+      - REDIS_HOST=redis
+    networks:
+      - sadae-network
+    restart: on-failure
   # Databases
   auth-db:
     image: postgres:15
@@ -56,7 +78,8 @@ services:
       POSTGRES_PASSWORD: auth_pass
     volumes:
       - auth_data:/var/lib/postgresql/data
-
+    networks:
+      - sadae-network
   core-db:
     image: postgres:15
     environment:
@@ -65,7 +88,33 @@ services:
       POSTGRES_PASSWORD: core_pass
     volumes:
       - core_data:/var/lib/postgresql/data
-
+    networks:
+      - sadae-network
+  monitoring-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: monitoring_db
+      POSTGRES_USER: monitoring_user
+      POSTGRES_PASSWORD: monitoring_pass
+    volumes:
+      - monitoring_data:/var/lib/postgresql/data
+    networks:
+      - sadae-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitoring_user -d monitoring_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - sadae-network
 volumes:
   auth_data:
   core_data:
+  monitoring_data:
+networks:
+  sadae-network:  
+    driver: bridge

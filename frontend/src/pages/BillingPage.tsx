@@ -19,12 +19,6 @@ import { formatCurrency, formatDate, getStatusColor, getStatusText } from "../ut
 import { BillListSkeleton, StatCardSkeleton } from "../components/billing/BillingSkeleton"
 import dataService, { type Bill, type BillDispute, type DebtNegotiation } from "../services/dataService"
 
-const extractNumericId = (formattedId: string | undefined | null): number | undefined => {
-  if (!formattedId) return undefined
-  const match = formattedId.match(/\d+/)
-  return match ? parseInt(match[0], 10) : undefined
-}
-
 export function BillingPage() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<"bills" | "disputes" | "negotiations">("bills")
@@ -179,18 +173,7 @@ export function BillingPage() {
   }, [bills])
     // Create dispute mutation
   const createDisputeMutation = useMutation({
-    mutationFn: ({ bill, reason }: { bill: Bill; reason: string }) => {
-      const billId = bill.originalId ?? extractNumericId(bill.id)
-      if (!billId) {
-        throw new Error("Não foi possível determinar o ID da fatura para contestação.")
-      }
-
-      return api.post("/billing/contests", {
-        bill_id: billId,
-        reason,
-        description: reason
-      })
-    },
+    mutationFn: (disputeData: { bill_id: string; reason: string }) => api.post("/billing/disputes", disputeData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["disputes"] })
       setShowDisputeForm(false)
@@ -201,18 +184,7 @@ export function BillingPage() {
 
   // Process payment mutation
   const processPaymentMutation = useMutation({
-    mutationFn: (bill: Bill) => {
-      const billId = bill.originalId ?? extractNumericId(bill.id)
-      if (!billId) {
-        throw new Error("Não foi possível determinar o ID da fatura para pagamento.")
-      }
-
-      return api.post("/billing/payments", {
-        bill_id: billId,
-        amount: bill.amount,
-        payment_method: "credit_card"
-      })
-    },
+    mutationFn: (billId: string) => api.post(`/billing/bills/${billId}/pay`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bills"] })
     },
@@ -675,7 +647,7 @@ export function BillingPage() {
                         {user?.role === "citizen" && bill.status === "pending" && (
                           <>
                             <Button
-                              onClick={() => processPaymentMutation.mutate(bill)}
+                              onClick={() => processPaymentMutation.mutate(bill.id)}
                               variant="success"
                               size="sm"
                               isLoading={processPaymentMutation.isPending}
@@ -956,7 +928,7 @@ export function BillingPage() {
             </Button>
             <Button
               onClick={() => selectedBill && createDisputeMutation.mutate({
-                bill: selectedBill,
+                bill_id: selectedBill.id,
                 reason: disputeReason,
               })}
               disabled={!disputeReason.trim() || disputeReason.length < 10}
@@ -1105,7 +1077,7 @@ export function BillingPage() {
                 <>
                   <Button
                     onClick={() => {
-                      processPaymentMutation.mutate(selectedBill)
+                      processPaymentMutation.mutate(selectedBill.id)
                       setShowBillDetails(false)
                     }}
                     variant="success"

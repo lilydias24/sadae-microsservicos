@@ -42,8 +42,6 @@ Base.metadata.create_all(bind=engine)
 # Security setup
 security = HTTPBearer()
 
-security = HTTPBearer()
-
 def get_db_session():
     """Get database session"""
     db = SessionLocal()
@@ -210,13 +208,8 @@ async def get_users(
     users = db.query(User).offset(skip).limit(limit).all()
     return users
 
-@app.get("/users/{user_id}", response_model=UserResponse)
-async def get_user(
-    user_id: int,
-    current_user: User = Depends(require_role([UserRole.OPERATOR, UserRole.CRISIS_MANAGER, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER])),
-    db: Session = Depends(get_db_session)
-):
-    """Get user by ID (admin only)"""
+def get_user_by_id(user_id: int, db: Session) -> User:
+    """Helper function to get user by ID or raise 404"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
@@ -225,6 +218,15 @@ async def get_user(
         )
     return user
 
+@app.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: int,
+    current_user: User = Depends(require_role([UserRole.OPERATOR, UserRole.CRISIS_MANAGER, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER])),
+    db: Session = Depends(get_db_session)
+):
+    """Get user by ID (admin only)"""
+    return get_user_by_id(user_id, db)
+
 @app.put("/users/{user_id}/activate")
 async def activate_user(
     user_id: int,
@@ -232,16 +234,9 @@ async def activate_user(
     db: Session = Depends(get_db_session)
 ):
     """Activate user account (operator only)"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+    user = get_user_by_id(user_id, db)
     user.is_active = True
     db.commit()
-    
     return {"message": "User activated successfully"}
 
 @app.put("/users/{user_id}/deactivate")
@@ -251,16 +246,9 @@ async def deactivate_user(
     db: Session = Depends(get_db_session)
 ):
     """Deactivate user account (operator only)"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+    user = get_user_by_id(user_id, db)
     user.is_active = False
     db.commit()
-    
     return {"message": "User deactivated successfully"}
 
 @app.post("/verify-token")
@@ -293,4 +281,4 @@ async def verify_user_token(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
