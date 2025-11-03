@@ -59,6 +59,45 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     payload = verify_token(token)
     return payload
 
+async def proxy_request_to_service(
+    service_name: str,
+    method: str,
+    endpoint: str,
+    request: Request = None,
+    credentials: HTTPAuthorizationCredentials = None,
+    timeout: float = 30.0
+):
+    """Helper function to proxy requests to services, reducing code duplication"""
+    url = f"{service_registry.get_service_url(service_name)}{endpoint}"
+    
+    headers = {}
+    if credentials:
+        headers["Authorization"] = f"Bearer {credentials.credentials}"
+    
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        body = None
+        if request and method.upper() in ["POST", "PUT", "PATCH"]:
+            body = await request.body()
+            headers["content-type"] = "application/json"
+        
+        params = dict(request.query_params) if request else {}
+        
+        if method.upper() == "GET":
+            response = await client.get(url, headers=headers, params=params)
+        elif method.upper() == "POST":
+            response = await client.post(url, content=body, headers=headers, params=params)
+        elif method.upper() == "PUT":
+            response = await client.put(url, content=body, headers=headers, params=params)
+        elif method.upper() == "DELETE":
+            response = await client.delete(url, headers=headers, params=params)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported method: {method}")
+        
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        
+        return response.json() if response.text else {}
+
 @app.get("/")
 async def root():
     return {"message": "SADAE API Gateway", "version": "1.0.0"}
@@ -66,7 +105,8 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+    from datetime import datetime
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 # Redirect legacy support routes to proper prefixed routes
 @app.get("/tickets")
@@ -328,36 +368,16 @@ async def assign_work_order(
 
 # Billing routes
 @app.get("/billing/bills")
-async def get_bills(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_bills(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Get bills"""
-    # Verify token first
     verify_token(credentials.credentials)
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{service_registry.get_service_url('core')}/billing/bills",
-            headers={"Authorization": f"Bearer {credentials.credentials}"}
-        )
-        return response.json()
+    return await proxy_request_to_service("core", "GET", "/billing/bills", request, credentials)
 
 @app.post("/billing/contests")
 async def create_bill_contest(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Contest a bill"""
-    # Verify token first
     verify_token(credentials.credentials)
-    
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{service_registry.get_service_url('core')}/billing/contests",
-            content=body,
-            headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {credentials.credentials}"
-            }
-        )
-        return response.json()
+    return await proxy_request_to_service("core", "POST", "/billing/contests", request, credentials)
 
 @app.put("/billing/contests/{contest_id}/resolve")
 async def resolve_bill_contest(
@@ -399,21 +419,8 @@ async def get_contests(credentials: HTTPAuthorizationCredentials = Depends(secur
 @app.post("/billing/debt-negotiations")
 async def create_debt_negotiation(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create a debt negotiation"""
-    # Verify token first
     verify_token(credentials.credentials)
-    
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{service_registry.get_service_url('core')}/billing/negotiations",
-            content=body,
-            headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {credentials.credentials}"
-            }
-        )
-        return response.json()
+    return await proxy_request_to_service("core", "POST", "/billing/negotiations", request, credentials)
 
 @app.put("/billing/debt-negotiations/{negotiation_id}/resolve")
 async def resolve_debt_negotiation(

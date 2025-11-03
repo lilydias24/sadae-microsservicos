@@ -121,6 +121,17 @@ export const DashboardPage: React.FC = () => {
     return "Boa noite"
   }
 
+  const translateSeverity = (severity: string | undefined): string => {
+    if (!severity) return "Médio"
+    const severityMap: { [key: string]: string } = {
+      low: "Baixo",
+      medium: "Médio",
+      high: "Alto",
+      critical: "Crítico"
+    }
+    return severityMap[severity.toLowerCase()] || severity
+  }
+
   const getRoleSpecificStats = () => {
     switch (user?.role) {
       case "operator":
@@ -385,12 +396,15 @@ export const DashboardPage: React.FC = () => {
                 </div>
                 <span
                   className={`px-2 py-1 text-xs rounded-full ${
-                    alert.severity === "high" || alert.urgency_level === "high"
+                    alert.severity === "high" || alert.severity === "critical" || 
+                    alert.urgency_level === "high" || alert.urgency_level === "critical"
                       ? "bg-red-100 text-red-800"
-                      : "bg-yellow-100 text-yellow-800"
+                      : alert.severity === "medium" || alert.urgency_level === "medium"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : "bg-blue-100 text-blue-800"
                   }`}
                 >
-                  {alert.severity || alert.urgency_level || "Médio"}
+                  {translateSeverity(alert.severity || alert.urgency_level)}
                 </span>
               </div>
             ))}
