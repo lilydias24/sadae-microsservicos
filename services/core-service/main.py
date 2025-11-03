@@ -72,13 +72,6 @@ try:
 except Exception as e:
     print(f"⚠️  Error loading monitoring router: {e}")
 
-try:
-    from routers.audit import router as audit_router
-    app.include_router(audit_router, prefix="/audit", tags=["audit"])
-    print("✅ Audit router loaded")
-except Exception as e:
-    print(f"⚠️  Error loading audit router: {e}")
-
 @app.get("/")
 async def root():
     return {

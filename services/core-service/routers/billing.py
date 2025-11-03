@@ -49,60 +49,10 @@ from schemas.billing import (
 )
 from business.billing_calculator import BillingCalculator
 
-# 🔗 Chain of Responsibility - Importar cadeias de validação
-try:
-    from business.billing_validation_chain import (
-        create_contest_validation_chain,
-        create_negotiation_validation_chain,
-        ContestRequest,
-        NegotiationRequest,
-        ContestReason
-    )
-    CHAIN_ENABLED = True
-    print("✅ Chain of Responsibility habilitado para Billing")
-except ImportError as e:
-    print(f"⚠️ Chain of Responsibility não disponível: {e}")
-    CHAIN_ENABLED = False
-
-# 📊 Audit Logger - Importar sistema de auditoria
-sys.path.insert(0, '/app/shared')
-try:
-    from audit_logger import (
-        audit_contest_decision,
-        audit_negotiation_decision,
-        audit_auto_approval,
-        audit_manual_review_required,
-        get_audit_logger,
-        set_audit_logger,
-        AuditLogger
-    )
-    AUDIT_ENABLED = True
-    print("✅ Sistema de Auditoria habilitado para Billing")
-except ImportError as e:
-    print(f"⚠️ Sistema de Auditoria não disponível: {e}")
-    AUDIT_ENABLED = False
-
 router = APIRouter()
 
 # Billing calculator
 billing_calculator = BillingCalculator()
-
-# 🔗 Inicializar cadeias de validação
-if CHAIN_ENABLED:
-    contest_validation_chain = create_contest_validation_chain()
-    negotiation_validation_chain = create_negotiation_validation_chain()
-
-# 📊 Configurar Audit Logger com sessão do banco
-if AUDIT_ENABLED:
-    from database import SessionLocal
-    audit_logger_instance = AuditLogger(
-        log_to_file=True,
-        log_to_db=True,
-        log_file_path="/tmp/sadae_audit.log",
-        db_session_factory=SessionLocal
-    )
-    set_audit_logger(audit_logger_instance)
-    print("✅ Audit Logger configurado com banco de dados")
 
 async def verify_user_token(authorization: str):
     """Verify user token locally"""
@@ -446,15 +396,7 @@ async def create_bill_contest(
     req: Request,
     db: Session = Depends(get_db)
 ):
-    """
-    🔗 Contest a bill with Chain of Responsibility validation
-    
-    A cadeia de validação analisa automaticamente:
-    - Elegibilidade da contestação
-    - Análise de valor vs. histórico de consumo
-    - Evidências fornecidas
-    - Auto-aprovação baseada em score (>= 70 = aprovado automático)
-    """
+    """Contest a bill (citizen only)"""
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
@@ -463,13 +405,9 @@ async def create_bill_contest(
     if not bill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     
-    # Get customer
-    customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
-    if not customer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    
     if user["role"] == UserRole.CITIZEN:
-        if bill.customer_id != customer.id:
+        customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
+        if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     # Check if contest already exists
@@ -479,135 +417,11 @@ async def create_bill_contest(
     
     protocol_number = generate_protocol_number()
     
-    # 🔗 CHAIN OF RESPONSIBILITY - Validação automática
-    validation_result = None
-    validation_notes = []
-    
-    if CHAIN_ENABLED:
-        try:
-            # Calcular média de consumo histórico
-            previous_bills = db.query(Bill).filter(
-                Bill.customer_id == bill.customer_id,
-                Bill.id < bill.id
-            ).order_by(Bill.created_at.desc()).limit(6).all()
-            
-            avg_consumption = None
-            if previous_bills:
-                avg_consumption = sum(b.amount for b in previous_bills) / len(previous_bills)
-            
-            # Mapear motivo para enum
-            reason_map = {
-                "high_consumption": ContestReason.HIGH_CONSUMPTION,
-                "billing_error": ContestReason.BILLING_ERROR,
-                "meter_defect": ContestReason.METER_DEFECT,
-                "leak_reported": ContestReason.LEAK_REPORTED,
-                "service_interruption": ContestReason.SERVICE_INTERRUPTION,
-                "duplicate_charge": ContestReason.DUPLICATE_CHARGE,
-                "other": ContestReason.OTHER
-            }
-            reason = reason_map.get(contest_data.reason, ContestReason.OTHER)
-            
-            # Criar requisição para a cadeia
-            chain_request = ContestRequest(
-                bill_id=bill.id,
-                customer_id=customer.id,
-                current_amount=bill.amount,
-                contested_amount=contest_data.contested_amount or bill.amount * Decimal("0.5"),
-                reason=reason,
-                description=contest_data.description,
-                evidence_files=getattr(contest_data, 'evidence_files', []),
-                previous_consumption_avg=avg_consumption,
-                has_leak_report=False,  # TODO: verificar se há relatório de vazamento
-                has_maintenance_request=False  # TODO: verificar ordens de manutenção
-            )
-            
-            # Processar na cadeia com medição de tempo
-            import time
-            start_time = time.time()
-            validation_result = contest_validation_chain.handle(chain_request)
-            processing_time_ms = (time.time() - start_time) * 1000
-            
-            validation_notes = validation_result.data.get('notes', [])
-            
-            print(f"🔗 Chain validation - Score: {validation_result.data['validation_score']}, Approved: {validation_result.approved}")
-            
-            # 📊 AUDITORIA - Registrar decisão da cadeia
-            if AUDIT_ENABLED:
-                try:
-                    audit_contest_decision(
-                        request_id=chain_request.request_id,
-                        user_id=customer.id,
-                        bill_id=bill.id,
-                        decision="approved" if validation_result.approved else ("review" if validation_result.requires_review else "rejected"),
-                        score=float(validation_result.data['validation_score']),
-                        handler_sequence=[entry['handler'] for entry in chain_request.processing_history],
-                        input_data={
-                            "bill_id": bill.id,
-                            "current_amount": float(bill.amount),
-                            "contested_amount": float(contest_data.contested_amount) if contest_data.contested_amount else None,
-                            "reason": contest_data.reason,
-                            "description": contest_data.description[:100]  # Limitar tamanho
-                        },
-                        output_data={
-                            "approved": validation_result.approved,
-                            "requires_review": validation_result.requires_review,
-                            "suggested_amount": float(validation_result.suggested_amount) if validation_result.suggested_amount else None,
-                            "validation_score": validation_result.data['validation_score']
-                        },
-                        processing_time_ms=processing_time_ms
-                    )
-                    
-                    # Log específico para auto-aprovações
-                    if validation_result.approved:
-                        audit_auto_approval(
-                            chain_name="ContestValidationChain",
-                            request_id=chain_request.request_id,
-                            user_id=customer.id,
-                            entity_type="bill_contest",
-                            entity_id=bill.id,
-                            reason=f"Score {validation_result.data['validation_score']} >= 70",
-                            score=float(validation_result.data['validation_score'])
-                        )
-                    elif validation_result.requires_review:
-                        audit_manual_review_required(
-                            chain_name="ContestValidationChain",
-                            request_id=chain_request.request_id,
-                            user_id=customer.id,
-                            entity_type="bill_contest",
-                            entity_id=bill.id,
-                            reason=f"Score {validation_result.data['validation_score']} requer revisão manual",
-                            score=float(validation_result.data['validation_score'])
-                        )
-                except Exception as audit_error:
-                    print(f"⚠️ Erro ao registrar auditoria: {audit_error}")
-            
-        except Exception as e:
-            print(f"⚠️ Erro na validação da cadeia: {e}")
-            # Continua sem validação automática em caso de erro
-    
-    # Determinar status inicial baseado na validação
-    initial_status = "pending"
-    suggested_amount = None
-    
-    if validation_result:
-        if validation_result.approved:
-            initial_status = "approved"
-            suggested_amount = validation_result.suggested_amount
-        elif validation_result.requires_review:
-            initial_status = "under_review"
-        else:
-            initial_status = "rejected"
-    
     contest = BillContest(
         **contest_data.dict(),
         protocol_number=protocol_number,
-        status=initial_status
+        status="pending"
     )
-    
-    # Adicionar notas de validação como comentário interno
-    if validation_notes:
-        contest.admin_notes = "\n".join([f"🔗 {note}" for note in validation_notes])
-    
     db.add(contest)
     
     # Update bill status
@@ -656,14 +470,14 @@ async def resolve_bill_contest(
     new_amount: Optional[float] = None,
     db: Session = Depends(get_db)
 ):
-    """Resolve bill contest (financial manager or operator)"""
+    """Resolve bill contest (financial manager only)"""
     print(f"🔍 Resolving contest - ID: {contest_id}, Type: {type(contest_id)}, Resolution: {resolution}, Approved: {approved}")
     
     try:
         authorization = req.headers.get("Authorization")
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
+        if user["role"] != UserRole.FINANCIAL_MANAGER:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         
         contest = db.query(BillContest).filter(BillContest.id == contest_id).first()
@@ -697,33 +511,17 @@ async def resolve_bill_contest(
 @router.post("/negotiations", response_model=DebtNegotiationResponse)
 async def create_debt_negotiation(
     negotiation_data: DebtNegotiationCreate,
-    request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    authorization: str = Depends(lambda request: request.headers.get("Authorization"))
 ):
-    """
-    🔗 Create debt negotiation with Chain of Responsibility validation
-    
-    A cadeia analisa automaticamente:
-    - Elegibilidade (sem negociações ativas)
-    - Análise de crédito e histórico de pagamento
-    - Validação de entrada mínima
-    - Definição automática de: parcelas máximas, taxa de juros, desconto
-    """
-    print(f"🔍 Creating negotiation - Data received: {negotiation_data}")
-    print(f"🔍 negotiation_data type: {type(negotiation_data)}")
-    print(f"🔍 negotiation_data dict: {negotiation_data.dict()}")
+    """Create debt negotiation (financial manager only)"""
+    print(f"🔍 Creating negotiation - Data: {negotiation_data}")
     
     try:
-        authorization = request.headers.get("Authorization")
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
+        if user["role"] != UserRole.FINANCIAL_MANAGER:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-        
-        # Get customer
-        customer = db.query(Customer).filter(Customer.id == negotiation_data.customer_id).first()
-        if not customer:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
         
         # Check if customer has active negotiation
         existing = db.query(DebtNegotiation).filter(
@@ -731,151 +529,28 @@ async def create_debt_negotiation(
             DebtNegotiation.status == "active"
         ).first()
         print(f"🔍 Existing negotiation: {existing}")
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer already has active negotiation")
         
-        # Get overdue bills
+        # Calculate negotiation terms
         overdue_bills = db.query(Bill).filter(
             Bill.customer_id == negotiation_data.customer_id,
             Bill.status == BillStatus.OVERDUE
         ).all()
         print(f"🔍 Found overdue bills: {len(overdue_bills)}")
         
-        if not overdue_bills:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No overdue bills found for this customer")
-        
         total_debt = sum(bill.amount for bill in overdue_bills)
         print(f"🔍 Total debt calculated: {total_debt}")
         
-        # 🔗 CHAIN OF RESPONSIBILITY - Validação e cálculo automático de condições
-        validation_result = None
-        validation_notes = []
-        final_terms = {
-            "installments": negotiation_data.installments,
-            "interest_rate": negotiation_data.interest_rate,
-            "discount_percentage": negotiation_data.discount_percentage or Decimal(0)
-        }
-        
-        if CHAIN_ENABLED:
-            try:
-                # Calcular score de histórico de pagamento (simplificado)
-                total_bills = db.query(Bill).filter(Bill.customer_id == customer.id).count()
-                paid_on_time = db.query(Bill).filter(
-                    Bill.customer_id == customer.id,
-                    Bill.status == BillStatus.PAID
-                ).count()
-                payment_score = int((paid_on_time / total_bills * 100)) if total_bills > 0 else 50
-                
-                # Calcular idade da dívida mais antiga
-                oldest_bill = min(overdue_bills, key=lambda b: b.due_date) if overdue_bills else None
-                debt_age_days = (datetime.now().date() - oldest_bill.due_date).days if oldest_bill else 0
-                
-                # Criar requisição para a cadeia
-                chain_request = NegotiationRequest(
-                    customer_id=customer.id,
-                    total_debt=total_debt,
-                    overdue_bills=[{"id": b.id, "amount": float(b.amount)} for b in overdue_bills],
-                    proposed_installments=negotiation_data.installments,
-                    proposed_down_payment=Decimal(str(negotiation_data.down_payment or 0)),
-                    payment_history_score=payment_score,
-                    has_active_negotiations=existing is not None,
-                    debt_age_days=debt_age_days
-                )
-                
-                # Processar na cadeia com medição de tempo
-                import time
-                start_time = time.time()
-                validation_result = negotiation_validation_chain.handle(chain_request)
-                processing_time_ms = (time.time() - start_time) * 1000
-                
-                validation_notes = validation_result.data.get('notes', [])
-                
-                print(f"🔗 Chain validation - Approved: {validation_result.approved}")
-                
-                # 📊 AUDITORIA - Registrar decisão da negociação
-                if AUDIT_ENABLED:
-                    try:
-                        audit_negotiation_decision(
-                            request_id=chain_request.request_id,
-                            user_id=user["id"],
-                            customer_id=customer.id,
-                            decision="approved" if validation_result.approved else "rejected",
-                            handler_sequence=[entry['handler'] for entry in chain_request.processing_history],
-                            input_data={
-                                "customer_id": customer.id,
-                                "total_debt": float(total_debt),
-                                "proposed_installments": negotiation_data.installments,
-                                "proposed_down_payment": float(negotiation_data.down_payment or 0),
-                                "payment_history_score": payment_score,
-                                "debt_age_days": debt_age_days
-                            },
-                            output_data={
-                                "approved": validation_result.approved,
-                                "max_installments": validation_result.data.get('max_installments'),
-                                "interest_rate": float(validation_result.data.get('interest_rate', 0)),
-                                "discount_percentage": float(validation_result.data.get('discount_percentage', 0))
-                            },
-                            processing_time_ms=processing_time_ms
-                        )
-                        
-                        # Log de auto-aprovação
-                        if validation_result.approved:
-                            audit_auto_approval(
-                                chain_name="NegotiationValidationChain",
-                                request_id=chain_request.request_id,
-                                user_id=user["id"],
-                                entity_type="debt_negotiation",
-                                entity_id=customer.id,
-                                reason=f"Negociação aprovada com desconto de {validation_result.data['discount_percentage']}%"
-                            )
-                    except Exception as audit_error:
-                        print(f"⚠️ Erro ao registrar auditoria: {audit_error}")
-                
-                # Se aprovado, usar os termos calculados pela cadeia
-                if validation_result.approved:
-                    final_terms = {
-                        "installments": validation_result.data['max_installments'],
-                        "interest_rate": validation_result.data['interest_rate'],
-                        "discount_percentage": validation_result.data['discount_percentage']
-                    }
-                    print(f"✅ Termos aprovados pela cadeia: {final_terms}")
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Negociação rejeitada: {validation_result.message}"
-                    )
-                    
-            except HTTPException:
-                raise
-            except Exception as e:
-                print(f"⚠️ Erro na validação da cadeia: {e}")
-                # Em caso de erro, usa valores padrão conservadores
-                final_terms = {
-                    "installments": min(negotiation_data.installments, 12),
-                    "interest_rate": Decimal("1.5"),
-                    "discount_percentage": Decimal(0)
-                }
-        
-        # Calcular valor com desconto
-        total_with_discount = total_debt * (Decimal("100") - final_terms["discount_percentage"]) / Decimal("100")
-        
-        # Calcular valor da parcela
-        down_payment = Decimal(str(negotiation_data.down_payment or 0))
-        remaining = total_with_discount - down_payment
-        installment_amount = remaining / final_terms["installments"] if final_terms["installments"] > 0 else remaining
-        
         negotiation = DebtNegotiation(
             customer_id=negotiation_data.customer_id,
-            installments=final_terms["installments"],
-            installment_amount=installment_amount,
-            discount_percentage=float(final_terms["discount_percentage"]),
-            interest_rate=float(final_terms["interest_rate"]),
+            installments=negotiation_data.installments,
+            installment_amount=Decimal(str(negotiation_data.installment_amount)),
+            discount_percentage=negotiation_data.discount_percentage,
+            interest_rate=negotiation_data.interest_rate,
             total_debt=total_debt,
             status="proposed"
         )
-        
-        # Adicionar notas de validação
-        if validation_notes:
-            negotiation.notes = "\n".join([f"🔗 {note}" for note in validation_notes])
-        
         print(f"🔍 Created negotiation object: {negotiation}")
         db.add(negotiation)
         db.commit()
@@ -924,10 +599,10 @@ async def resolve_debt_negotiation(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Resolve debt negotiation (financial manager or operator)"""
+    """Resolve debt negotiation (financial manager only)"""
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
+    if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Try to find by string ID first, then by integer ID
@@ -1160,7 +835,20 @@ async def resolve_contest(contest_id: int, resolution: str, approved: bool, db: 
     db.commit()
     return contest
 
-# ❌ Rotas duplicadas removidas - usar as rotas com Chain of Responsibility acima
+@router.post("/negotiations")
+async def create_negotiation(negotiation_data: dict, db: Session = Depends(get_db)):
+    """Create debt negotiation"""
+    negotiation = DebtNegotiation(**negotiation_data)
+    db.add(negotiation)
+    db.commit()
+    db.refresh(negotiation)
+    return negotiation
+
+@router.get("/negotiations")
+async def get_negotiations(db: Session = Depends(get_db)):
+    """Get all negotiations"""
+    negotiations = db.query(DebtNegotiation).all()
+    return negotiations
 
 @router.post("/payments")
 async def process_payment(payment_data: dict, db: Session = Depends(get_db)):

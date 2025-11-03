@@ -16,22 +16,34 @@ from database_models import Customer, WaterMeter, MeterReading, Bill, TariffRate
 class BillingCalculator:
     """Calculate water bills based on consumption and tariff rates"""
     
+    # Default tariff rates by customer type
+    DEFAULT_RATES = {
+        "residential": [
+            {"tier_start": 0, "tier_end": 10, "rate": Decimal("2.50"), "fixed": Decimal("15.00")},
+            {"tier_start": 10, "tier_end": 20, "rate": Decimal("3.00"), "fixed": Decimal("0.00")},
+            {"tier_start": 20, "tier_end": 50, "rate": Decimal("4.50"), "fixed": Decimal("0.00")},
+            {"tier_start": 50, "tier_end": None, "rate": Decimal("6.00"), "fixed": Decimal("0.00")}
+        ],
+        "commercial": [
+            {"tier_start": 0, "tier_end": 50, "rate": Decimal("4.00"), "fixed": Decimal("25.00")},
+            {"tier_start": 50, "tier_end": None, "rate": Decimal("5.50"), "fixed": Decimal("0.00")}
+        ],
+        "industrial": [
+            {"tier_start": 0, "tier_end": None, "rate": Decimal("3.50"), "fixed": Decimal("50.00")}
+        ]
+    }
+    
+    # Constants for calculations
+    DEFAULT_CONSUMPTION_ESTIMATE = 15.0  # m³
+    MIN_CONSUMPTION_ESTIMATE = 5.0  # m³
+    BILL_PAYMENT_DAYS = 30  # days
+    LATE_FEE_DAILY_RATE = Decimal('0.0007')  # 0.07% per day
+    LATE_FEE_FIXED = Decimal('5.00')
+    MAX_LATE_FEE_PERCENTAGE = Decimal('0.5')  # 50% max
+    
     def __init__(self):
-        self.default_rates = {
-            "residential": [
-                {"tier_start": 0, "tier_end": 10, "rate": Decimal("2.50"), "fixed": Decimal("15.00")},
-                {"tier_start": 10, "tier_end": 20, "rate": Decimal("3.00"), "fixed": Decimal("0.00")},
-                {"tier_start": 20, "tier_end": 50, "rate": Decimal("4.50"), "fixed": Decimal("0.00")},
-                {"tier_start": 50, "tier_end": None, "rate": Decimal("6.00"), "fixed": Decimal("0.00")}
-            ],
-            "commercial": [
-                {"tier_start": 0, "tier_end": 50, "rate": Decimal("4.00"), "fixed": Decimal("25.00")},
-                {"tier_start": 50, "tier_end": None, "rate": Decimal("5.50"), "fixed": Decimal("0.00")}
-            ],
-            "industrial": [
-                {"tier_start": 0, "tier_end": None, "rate": Decimal("3.50"), "fixed": Decimal("50.00")}
-            ]
-        }
+        """Initialize billing calculator with default rates"""
+        self.default_rates = self.DEFAULT_RATES
     
     async def generate_monthly_bill(self, customer_id: int, month: int, year: int, db: Session) -> Optional[Bill]:
         """Generate monthly bill for a customer"""
@@ -70,7 +82,7 @@ class BillingCalculator:
             amount = await self._calculate_bill_amount(customer.customer_type, consumption, db)
             
             # Create bill
-            due_date = billing_end + timedelta(days=30)  # 30 days to pay
+            due_date = billing_end + timedelta(days=self.BILL_PAYMENT_DAYS)
             
             bill = Bill(
                 customer_id=customer_id,
@@ -129,18 +141,18 @@ class BillingCalculator:
             ).order_by(MeterReading.reading_date).all()
             
             if len(readings) < 2:
-                return 15.0  # Default estimate for residential
+                return self.DEFAULT_CONSUMPTION_ESTIMATE
             
             # Calculate average monthly consumption
             total_consumption = readings[-1].reading_value - readings[0].reading_value
             months = len(readings) / 30  # Approximate months
             average_monthly = total_consumption / max(1, months)
             
-            return max(5.0, average_monthly)  # Minimum 5m³
+            return max(self.MIN_CONSUMPTION_ESTIMATE, average_monthly)
             
         except Exception as e:
             print(f"Error estimating consumption: {e}")
-            return 15.0
+            return self.DEFAULT_CONSUMPTION_ESTIMATE
     
     async def _calculate_bill_amount(self, customer_type: str, consumption: float, db: Session) -> Decimal:
         """Calculate bill amount based on consumption and tariff rates"""
@@ -208,12 +220,8 @@ class BillingCalculator:
         if days_overdue <= 0:
             return Decimal('0.00')
         
-        # 2% per month (0.067% per day) + fixed fee
-        daily_rate = Decimal('0.0007')  # 0.07% per day
-        fixed_fee = Decimal('5.00')
-        
-        late_fee = (bill.amount * daily_rate * days_overdue) + fixed_fee
-        return min(late_fee, bill.amount * Decimal('0.5'))  # Max 50% of original amount
+        late_fee = (bill.amount * self.LATE_FEE_DAILY_RATE * days_overdue) + self.LATE_FEE_FIXED
+        return min(late_fee, bill.amount * self.MAX_LATE_FEE_PERCENTAGE)
     
     async def calculate_negotiation_terms(self, total_debt: Decimal, installments: int) -> dict:
         """Calculate debt negotiation terms"""

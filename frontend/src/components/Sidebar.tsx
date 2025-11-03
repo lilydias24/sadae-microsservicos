@@ -6,7 +6,7 @@ import { LayoutDashboard, Activity, Wrench, CreditCard, AlertTriangle, MessageSq
 import { useAuth } from "../contexts/AuthContext"
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["all"] },
+  { name: "Painel", href: "/dashboard", icon: LayoutDashboard, roles: ["all"] },
   { name: "Monitoramento", href: "/monitoring", icon: Activity, roles: ["operator", "crisis_manager"] },
   { name: "Manutenção", href: "/maintenance", icon: Wrench, roles: ["maintenance_manager", "operator"] },
   { name: "Faturamento", href: "/billing", icon: CreditCard, roles: ["all"] },

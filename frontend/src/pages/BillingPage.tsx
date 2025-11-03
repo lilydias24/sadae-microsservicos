@@ -217,19 +217,13 @@ export function BillingPage() {
       interest_rate: number
     }) => {
       const installment_amount = negotiationData.total_debt / negotiationData.installments
-      
-      // Validate all numeric fields to prevent NaN
-      const validatedData = {
+      return api.post("/billing/negotiations", {
         customer_id: negotiationData.customer_id,
         installments: negotiationData.installments,
-        installment_amount: isNaN(installment_amount) ? 0 : installment_amount,
-        discount_percentage: isNaN(negotiationData.discount_percentage) ? 0 : negotiationData.discount_percentage,
-        interest_rate: isNaN(negotiationData.interest_rate) ? 0 : negotiationData.interest_rate
-      }
-      
-      console.log("📤 Sending negotiation data:", validatedData)
-      
-      return api.post("/billing/negotiations", validatedData)
+        installment_amount: installment_amount,
+        discount_percentage: negotiationData.discount_percentage,
+        interest_rate: negotiationData.interest_rate
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["negotiations"] })
@@ -242,12 +236,6 @@ export function BillingPage() {
         interestRate: "",
         description: ""
       })
-    },
-    onError: (error: any) => {
-      console.error("❌ Error creating negotiation:", error)
-      const errorMessage = error?.response?.data?.detail || "Erro ao criar negociação"
-      console.error("Error details:", errorMessage)
-      // You could show a toast notification here if you have one
     },
   })
 
@@ -1559,19 +1547,12 @@ export function BillingPage() {
               className="flex-1 bg-blue-600 hover:bg-blue-700"
               onClick={() => {
                 if (newNegotiation.customerId && newNegotiation.totalDebt && newNegotiation.installments) {
-                  const discountPercentage = newNegotiation.discountPercentage 
-                    ? parseFloat(newNegotiation.discountPercentage) 
-                    : 0;
-                  const interestRate = newNegotiation.interestRate 
-                    ? parseFloat(newNegotiation.interestRate) 
-                    : 0;
-                  
                   createNegotiationMutation.mutate({
                     customer_id: parseInt(newNegotiation.customerId),
                     total_debt: parseFloat(newNegotiation.totalDebt),
                     installments: parseInt(newNegotiation.installments),
-                    discount_percentage: isNaN(discountPercentage) ? 0 : discountPercentage,
-                    interest_rate: isNaN(interestRate) ? 0 : interestRate
+                    discount_percentage: parseFloat(newNegotiation.discountPercentage || "0"),
+                    interest_rate: parseFloat(newNegotiation.interestRate || "0")
                   })
                 }
               }}

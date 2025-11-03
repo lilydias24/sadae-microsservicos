@@ -23,7 +23,7 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import shared modules: {e}")
     # Create minimal fallbacks for development
-    def verify_token(token):
+    async def verify_token(token):
         return {"id": 1, "name": "Test User", "email": "test@test.com", "role": "operator"}
     
     class UserRole:
@@ -67,7 +67,7 @@ async def verify_user_token(authorization: str) -> dict:
         )
     
     token = authorization.split(" ")[1]
-    user = verify_token(token)  # ✅ Não é async
+    user = await verify_token(token)
     return user
 
 # Simple connection manager for WebSocket
