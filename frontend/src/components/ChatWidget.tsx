@@ -106,7 +106,9 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
 
   const createTicketFromChat = async (content: string): Promise<number | null> => {
     try {
-      const { data: ticket } = await api.post('/support/tickets', {
+      console.log('📝 Criando ticket do widget com dados:', { content })
+      
+      const response = await api.post('/support/tickets', {
         title: `Chat: ${content.substring(0, 50)}`,
         description: content,
         category: 'information',
@@ -114,9 +116,15 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
         client_phone: user?.phone || ''
       })
 
-      return ticket.id
-    } catch (error) {
-      console.error('Erro ao criar ticket:', error)
+      console.log('✅ Ticket criado do widget:', response.data)
+      return response.data.id
+    } catch (error: any) {
+      console.error('❌ Erro ao criar ticket do widget:', error)
+      console.error('❌ Detalhes do erro:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      })
       return null
     }
   }

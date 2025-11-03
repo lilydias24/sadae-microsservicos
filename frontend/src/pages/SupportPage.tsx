@@ -190,9 +190,13 @@ export function SupportPage() {
   const fetchTickets = async () => {
     try {
       setLoading(true)
-      const { data } = await api.get('/support/tickets')
+      console.log('🔍 Buscando tickets...')
+      const response = await api.get('/support/tickets')
+      console.log('📦 Resposta da API:', response)
+      
       // Garantir que data seja sempre um array e mapear os campos corretamente
-      const ticketsArray = Array.isArray(data) ? data : []
+      const ticketsArray = Array.isArray(response.data) ? response.data : []
+      console.log(`✅ Tickets encontrados: ${ticketsArray.length}`)
       
       // Mapear e normalizar os dados dos tickets
       const normalizedTickets = ticketsArray.map((ticket: any) => ({
@@ -212,10 +216,18 @@ export function SupportPage() {
         evaluation: ticket.evaluation || null
       }))
       
+      console.log('✅ Tickets normalizados:', normalizedTickets)
       setTickets(normalizedTickets)
-    } catch (error) {
-      console.error('Error fetching tickets:', error)
+    } catch (error: any) {
+      console.error('❌ Erro ao buscar tickets:', error)
+      console.error('❌ Detalhes do erro:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      })
       setTickets([]) // Definir array vazio em caso de erro
+      alert(`Erro ao carregar tickets: ${error.response?.data?.detail || error.message || 'Erro desconhecido'}`)
     } finally {
       setLoading(false)
     }
@@ -403,14 +415,63 @@ export function SupportPage() {
     e.preventDefault()
     try {
       setLoading(true)
-      const { data } = await api.post('/support/tickets', newTicket)
-      // Recarregar a lista de tickets para garantir que todos os dados estão atualizados
-      await fetchTickets()
+      console.log('📝 Criando ticket com dados:', newTicket)
+      
+      const response = await api.post('/support/tickets', newTicket)
+      console.log('✅ Ticket criado com sucesso:', response.data)
+      
+      // Normalizar o ticket criado para o formato esperado
+      const createdTicket = response.data
+      const normalizedCreatedTicket = {
+        id: createdTicket.id,
+        ticket_number: createdTicket.ticket_number || `TKT-${createdTicket.id}` || '--',
+        title: createdTicket.title || newTicket.title || 'Sem título',
+        description: createdTicket.description || newTicket.description || 'Sem descrição',
+        category: createdTicket.category?.value || createdTicket.category || newTicket.category || 'request',
+        priority: createdTicket.priority?.value || createdTicket.priority || newTicket.priority || 'medium',
+        status: createdTicket.status?.value || createdTicket.status || 'open',
+        client_name: createdTicket.client_name || user?.full_name || 'Cliente',
+        client_email: createdTicket.client_email || user?.email || '',
+        assigned_agent_name: createdTicket.assigned_agent_name || createdTicket.assigned_agent?.name || null,
+        created_at: createdTicket.created_at || new Date().toISOString(),
+        updated_at: createdTicket.updated_at || null,
+        satisfaction_rating: createdTicket.satisfaction_rating || null,
+        evaluation: createdTicket.evaluation || null
+      }
+      
+      // Adicionar o ticket recém-criado no início da lista (otimista)
+      setTickets(prev => [normalizedCreatedTicket, ...prev])
+      
+      // Limpar formulário e fechar modal
       setNewTicket({ title: '', description: '', category: 'request', priority: 'medium' })
       setShowCreateTicket(false)
-    } catch (error) {
-      console.error('Error creating ticket:', error)
-      alert('Não foi possível criar o ticket. Verifique os dados e tente novamente.')
+      
+      // Limpar filtros que podem ocultar o novo ticket
+      setSearchTerm('')
+      setFilterStatus('all')
+      setFilterCategory('all')
+      
+      // Garantir que estamos vendo a lista, não um ticket específico
+      setSelectedTicket(null)
+      
+      // Recarregar a lista completa após um pequeno delay para garantir sincronização
+      setTimeout(async () => {
+        await fetchTickets()
+      }, 500)
+      
+      alert('Ticket criado com sucesso!')
+    } catch (error: any) {
+      console.error('❌ Erro ao criar ticket:', error)
+      console.error('❌ Detalhes do erro:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        request: error.config
+      })
+      
+      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'Erro desconhecido'
+      alert(`Não foi possível criar o ticket: ${errorMessage}`)
     } finally {
       setLoading(false)
     }
@@ -439,6 +500,18 @@ export function SupportPage() {
     const matchesCategory = filterCategory === 'all' || ticket.category === filterCategory
     return matchesSearch && matchesStatus && matchesCategory
   }) : []
+
+  // Debug: Log quando tickets ou filtros mudarem
+  useEffect(() => {
+    console.log('🔍 Debug de filtros:', {
+      totalTickets: tickets.length,
+      filteredTickets: filteredTickets.length,
+      searchTerm,
+      filterStatus,
+      filterCategory,
+      tickets: tickets.map(t => ({ id: t.id, title: t.title, status: t.status, category: t.category }))
+    })
+  }, [tickets, filteredTickets, searchTerm, filterStatus, filterCategory])
 
   // Knowledge Base filtering with text, category and tags
   const normalize = (s: string) => s.toLowerCase()
