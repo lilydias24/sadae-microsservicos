@@ -547,3 +547,5 @@ if __name__ == "__main__":
         print(f"❌ Falha ao enviar notificação: {result.message}")
         print(f"Canais tentados: {result.data['attempted_channels']}")
 
+
+

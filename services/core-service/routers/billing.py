@@ -656,14 +656,14 @@ async def resolve_bill_contest(
     new_amount: Optional[float] = None,
     db: Session = Depends(get_db)
 ):
-    """Resolve bill contest (financial manager only)"""
+    """Resolve bill contest (financial manager or operator)"""
     print(f"🔍 Resolving contest - ID: {contest_id}, Type: {type(contest_id)}, Resolution: {resolution}, Approved: {approved}")
     
     try:
         authorization = req.headers.get("Authorization")
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] != UserRole.FINANCIAL_MANAGER:
+        if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         
         contest = db.query(BillContest).filter(BillContest.id == contest_id).first()
@@ -717,7 +717,7 @@ async def create_debt_negotiation(
         authorization = request.headers.get("Authorization")
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] != UserRole.FINANCIAL_MANAGER:
+        if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         
         # Get customer
@@ -924,10 +924,10 @@ async def resolve_debt_negotiation(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Resolve debt negotiation (financial manager only)"""
+    """Resolve debt negotiation (financial manager or operator)"""
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] not in [UserRole.FINANCIAL_MANAGER, UserRole.OPERATOR]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Try to find by string ID first, then by integer ID

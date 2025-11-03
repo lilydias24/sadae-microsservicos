@@ -656,3 +656,4 @@ if __name__ == "__main__":
     print(f"Duração: {result.data['estimated_duration_hours']}h")
     print(f"Aprovado: {result.data['approved']}")
 
+

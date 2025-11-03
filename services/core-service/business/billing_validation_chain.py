@@ -161,7 +161,7 @@ class NegotiationResponse(Response):
         self.approved = approved
 
 
-# ==================== CONTEST VALIDATION HANDLERS ====================
+
 
 class ContestEligibilityHandler(Handler[ContestRequest, ContestResponse]):
     """
@@ -695,4 +695,5 @@ if __name__ == "__main__":
     print(f"\nNegociação: {result.message}")
     print(f"Aprovado: {result.approved}")
     print(f"Parcelas: {result.data['max_installments']}")
+
 

@@ -329,3 +329,4 @@ def chain_with_logging(*handlers: Handler, verbose: bool = True) -> Handler:
     logged_handlers = [LoggingHandler(h, verbose) for h in handlers]
     return create_simple_chain(*logged_handlers)
 
+
