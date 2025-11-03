@@ -19,7 +19,10 @@ except ImportError as e:
 app = FastAPI(
     title="SADAE Core Service",
     description="Core Service for SADAE - Sistema de Análise de Dados de Abastecimento e Esgoto",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # CORS
