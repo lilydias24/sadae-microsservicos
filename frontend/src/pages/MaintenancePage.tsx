@@ -7,8 +7,8 @@ interface WorkOrder {
   id: string
   title: string
   description: string
-  priority: "baixa" | "média" | "alta" | "urgente"
-  status: "aberto" | "atribuido" | "em progresso" | "completo"
+  priority: "low" | "medium" | "high" | "critical"
+  status: "open" | "assigned" | "in_progress" | "completed"
   assigned_team: string | null
   created_at: string
   updated_at: string
@@ -19,7 +19,7 @@ interface WorkOrder {
 interface Team {
   id: string
   name: string
-  status: "disponivel" | "ocupado"
+  status: "available" | "busy"
   members_count: number
 }
 
@@ -28,7 +28,7 @@ interface Complaint {
   citizen_name: string
   description: string
   location: string
-  status: "aberto" | "em progresso" | "resolvido"
+  status: "open" | "in_progress" | "resolved"
   created_at: string
 }
 
@@ -43,7 +43,7 @@ export function MaintenancePage() {
   const [newOrder, setNewOrder] = useState<Partial<WorkOrder>>({
     title: "",
     description: "",
-    priority: "média",
+    priority: "medium",
     location: "",
     estimated_duration: 1,
   })
@@ -81,7 +81,7 @@ export function MaintenancePage() {
       setNewOrder({
         title: "",
         description: "",
-        priority: "média",
+        priority: "medium",
         location: "",
         estimated_duration: 1,
       })
@@ -109,19 +109,27 @@ export function MaintenancePage() {
     }
   }
 
-  // Mapeamento de prioridades do português (UI) para inglês (API)
-  const priorityMapping = {
-    "baixa": "low",
-    "média": "medium", 
-    "alta": "high",
-    "urgente": "critical"
+  // Mapeamento de status e prioridades para exibição
+  const statusDisplayMapping = {
+    "open": "aberto",
+    "assigned": "atribuido", 
+    "in_progress": "em progresso",
+    "completed": "completo"
+  }
+
+  // Mapeamento de prioridades para exibição
+  const priorityDisplayMapping = {
+    "low": "baixa",
+    "medium": "média",
+    "high": "alta", 
+    "critical": "urgente"
   }
 
   const createOrder = (orderData: Partial<WorkOrder>) => {
     const orderPayload = {
       title: orderData.title || "",
       description: orderData.description || "",
-      priority: priorityMapping[orderData.priority as keyof typeof priorityMapping] || "medium",
+      priority: orderData.priority || "medium",
       location: orderData.location || "",
       estimated_duration: orderData.estimated_duration || 1
     }
@@ -143,13 +151,7 @@ export function MaintenancePage() {
     }
   }
 
-  // Mapeamento reverso para exibição (inglês -> português)
-  const priorityDisplayMapping = {
-    "low": "baixa",
-    "medium": "média",
-    "high": "alta", 
-    "critical": "urgente"
-  }
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -195,13 +197,6 @@ export function MaintenancePage() {
               onSubmit={e => {
                 e.preventDefault()
                 createOrder(newOrder)
-                setNewOrder({
-                  title: "",
-                  description: "",
-                  priority: "média",
-                  location: "",
-                  estimated_duration: 1,
-                })
               }}
             >
               <div>
@@ -230,10 +225,10 @@ export function MaintenancePage() {
                   value={newOrder.priority}
                   onChange={e => setNewOrder({ ...newOrder, priority: e.target.value as WorkOrder["priority"] })}
                 >
-                  <option value="baixa">Baixa</option>
-                  <option value="média">Média</option>
-                  <option value="alta">Alta</option>
-                  <option value="urgente">Urgente</option>
+                  <option value="low">Baixa</option>
+                  <option value="medium">Média</option>
+                  <option value="high">Alta</option>
+                  <option value="critical">Urgente</option>
                 </select>
               </div>
               <div>
@@ -331,7 +326,7 @@ export function MaintenancePage() {
                         <span
                           className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
                         >
-                          {order.status}
+                          {statusDisplayMapping[order.status as keyof typeof statusDisplayMapping] || order.status}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600 mt-1">{order.description}</p>
@@ -342,7 +337,7 @@ export function MaintenancePage() {
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
-                      {order.status === "aberto" && (
+                      {order.status === "open" && (
                         <button
                           onClick={() => setSelectedOrder(order)}
                           className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -370,10 +365,10 @@ export function MaintenancePage() {
                 <h3 className="text-lg font-semibold text-gray-900">{team.name}</h3>
                 <span
                   className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                    team.status === "disponivel" ? "text-green-600 bg-green-100" : "text-red-600 bg-red-100"
+                    team.status === "available" ? "text-green-600 bg-green-100" : "text-red-600 bg-red-100"
                   }`}
                 >
-                  {team.status}
+                  {team.status === "available" ? "Disponível" : "Ocupado"}
                 </span>
               </div>
               <div className="space-y-2">
@@ -435,7 +430,7 @@ export function MaintenancePage() {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Atribuir Equipe - {selectedOrder.title}</h3>
             <div className="space-y-3">
               {teams
-                .filter((t: Team) => t.status === "disponivel")
+                .filter((t: Team) => t.status === "available")
                 .map((team: Team) => (
                   <button
                     key={team.id}

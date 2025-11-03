@@ -155,18 +155,88 @@ export function MonitoringPage() {
     switch (status) {
       case "normal": return "text-green-600 bg-green-100"
       case "warning": return "text-yellow-600 bg-yellow-100"
-      case "critical": return "text-red-600 bg-red-100"
+      case "critical": return "text-white bg-red-600"
       default: return "text-gray-600 bg-gray-100"
     }
   }
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
+  const getSeverityColor = (severity: string | undefined) => {
+    if (!severity) return "text-gray-600 bg-gray-100"
+    const normalizedSeverity = severity.toLowerCase()
+    switch (normalizedSeverity) {
       case "low": return "text-blue-600 bg-blue-100"
       case "medium": return "text-yellow-600 bg-yellow-100"
-      case "high": return "text-red-600 bg-red-100"
+      case "high": return "text-white bg-red-500"
+      case "critical": return "text-white bg-red-700"
       default: return "text-gray-600 bg-gray-100"
     }
+  }
+
+  const translateSensorType = (type: string): string => {
+    const typeMap: { [key: string]: string } = {
+      pressure: "Pressão",
+      flow: "Fluxo",
+      level: "Nível",
+      quality: "Qualidade",
+      precipitation: "Precipitação",
+      water_quality: "Qualidade da Água",
+      river_level: "Nível do Rio"
+    }
+    return typeMap[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1)
+  }
+
+  const translateStatus = (status: string): string => {
+    const statusMap: { [key: string]: string } = {
+      normal: "Normal",
+      warning: "Aviso",
+      critical: "Crítico"
+    }
+    return statusMap[status.toLowerCase()] || status
+  }
+
+  const translateSeverity = (severity: string | undefined): string => {
+    if (!severity) return "Médio"
+    const severityMap: { [key: string]: string } = {
+      low: "Baixo",
+      medium: "Médio",
+      high: "Alto",
+      critical: "Crítico"
+    }
+    return severityMap[severity.toLowerCase()] || severity
+  }
+
+  const translateAnomalyDescription = (description: string): string => {
+    if (!description) return ""
+    
+    // Traduzir descrições automáticas em inglês
+    if (description.toLowerCase().includes("automatic anomaly detection")) {
+      // Padrão 1: "Automatic anomaly detection: river_level value 2.21 exceeds threshold"
+      // Padrão 2: "Automatic anomaly detection: precipitation value 9.28 exceeds threshold"
+      const typeMatch = description.match(/(river_level|precipitation|flow|water_quality|pressure|level|quality)\s+value\s+([0-9.]+)/i)
+      const thresholdMatch = description.match(/exceeds\s+threshold/i)
+      
+      if (typeMatch && thresholdMatch) {
+        const sensorType = translateSensorType(typeMatch[1])
+        const value = typeMatch[2]
+        return `Detecção automática de anomalia: ${sensorType} com valor ${value} excede o limiar`
+      }
+      
+      // Tradução genérica com substituições
+      return description
+        .replace(/Automatic anomaly detection:/i, "Detecção automática de anomalia:")
+        .replace(/automatic anomaly detection:/i, "detecção automática de anomalia:")
+        .replace(/exceeds threshold/i, "excede o limiar")
+        .replace(/exceeded threshold/i, "excedeu o limiar")
+        .replace(/river_level/gi, "nível do rio")
+        .replace(/precipitation/gi, "precipitação")
+        .replace(/water_quality/gi, "qualidade da água")
+        .replace(/\bflow\b/gi, "fluxo")
+        .replace(/\bpressure\b/gi, "pressão")
+        .replace(/\blevel\b/gi, "nível")
+        .replace(/\bquality\b/gi, "qualidade")
+        .replace(/\bvalue\b/gi, "valor")
+    }
+    return description
   }
 
   if (sensorsLoading || anomaliesLoading) {
@@ -302,7 +372,7 @@ export function MonitoringPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-900">
-                      {sensor.sensor_type.charAt(0).toUpperCase() + sensor.sensor_type.slice(1)} - {sensor.sensor_id}
+                      {translateSensorType(sensor.sensor_type)} - {sensor.sensor_id}
                     </p>
                     <p className="text-sm text-gray-600">{sensor.location}</p>
                   </div>
@@ -311,7 +381,7 @@ export function MonitoringPage() {
                       {sensor.value} {sensor.unit}
                     </p>
                     <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(sensor.status)}`}>
-                      {sensor.status}
+                      {translateStatus(sensor.status)}
                     </span>
                   </div>
                 </div>
@@ -331,12 +401,12 @@ export function MonitoringPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <p className="text-sm font-medium text-gray-900">Sensor {anomaly.sensor_id}</p>
-                    <p className="text-sm text-gray-600 mt-1">{anomaly.description}</p>
+                    <p className="text-sm text-gray-600 mt-1">{translateAnomalyDescription(anomaly.description)}</p>
                     <p className="text-xs text-gray-500 mt-1">{new Date(anomaly.created_at).toLocaleString("pt-BR")}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
-                      {anomaly.severity}
+                      {translateSeverity(anomaly.severity)}
                     </span>
                     <button
                       onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
