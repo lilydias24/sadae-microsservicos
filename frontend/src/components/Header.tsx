@@ -11,6 +11,19 @@ export const Header: React.FC = () => {
 
   const unreadAlerts = alerts.filter((alert) => !alert.read).length
 
+  const translateRole = (role: string | undefined): string => {
+    if (!role) return ""
+    const roleMap: { [key: string]: string } = {
+      operator: "Operador",
+      citizen: "Cidadão",
+      support_agent: "Agente de Suporte",
+      crisis_manager: "Gestor de Crise",
+      maintenance_manager: "Gestor de Manutenção",
+      financial_manager: "Gestor Financeiro"
+    }
+    return roleMap[role.toLowerCase()] || role.replace("_", " ")
+  }
+
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -39,7 +52,7 @@ export const Header: React.FC = () => {
           <div className="flex items-center space-x-3">
             <div className="text-right">
               <p className="text-sm font-medium text-slate-800">{user?.full_name}</p>
-              <p className="text-xs text-slate-600 capitalize">{user?.role?.replace("_", " ")}</p>
+              <p className="text-xs text-slate-600">{translateRole(user?.role)}</p>
             </div>
             <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
               <User className="w-4 h-4 text-white" />
