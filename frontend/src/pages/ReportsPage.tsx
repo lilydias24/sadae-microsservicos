@@ -1,16 +1,13 @@
 "use client"
 
 import React, { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { 
-  FileText, 
   Download, 
   Calendar, 
   Filter, 
-  BarChart3, 
-  TrendingUp,
   Activity,
   Wrench,
   CreditCard,

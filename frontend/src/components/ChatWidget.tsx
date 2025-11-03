@@ -24,7 +24,6 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
   const [isTyping, setIsTyping] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [currentTicketId, setCurrentTicketId] = useState<number | null>(initialTicketId || null)
-  const [chatSessionId, setChatSessionId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
 
@@ -36,7 +35,8 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -45,10 +45,6 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
   const initializeChat = async () => {
     setIsLoading(true)
     try {
-      // Criar sessão de chat ou buscar ticket existente
-      const sessionId = `chat-${Date.now()}`
-      setChatSessionId(sessionId)
-
       // Mensagem de boas-vindas do bot
       const welcomeMessage: ChatMessage = {
         id: `welcome-${Date.now()}`,

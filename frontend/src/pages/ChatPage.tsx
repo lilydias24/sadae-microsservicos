@@ -27,9 +27,12 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    initializeChat()
-    loadChatHistory()
-  }, [])
+    if (user) {
+      initializeChat()
+      loadChatHistory()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   useEffect(() => {
     scrollToBottom()
@@ -61,9 +64,15 @@ export function ChatPage() {
       const { data: tickets } = await api.get('/support/tickets', {
         params: { limit: 10 }
       })
-      setChatHistory(tickets || [])
+      // Garantir que tickets seja sempre um array
+      if (Array.isArray(tickets)) {
+        setChatHistory(tickets)
+      } else {
+        setChatHistory([])
+      }
     } catch (error) {
       console.error('Erro ao carregar histórico:', error)
+      setChatHistory([]) // Garantir array vazio em caso de erro
     }
   }
 
@@ -192,20 +201,27 @@ export function ChatPage() {
       setIsLoading(true)
       const { data: ticketMessages } = await api.get(`/support/tickets/${ticketId}/messages`)
       
-      const chatMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
-        id: `msg-${msg.id}`,
-        content: msg.content,
-        sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'agent' : 'bot',
-        timestamp: new Date(msg.created_at),
-        ticket_id: ticketId,
-        author_name: msg.author_name
-      }))
+      // Garantir que ticketMessages seja sempre um array
+      if (Array.isArray(ticketMessages)) {
+        const chatMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
+          id: `msg-${msg.id}`,
+          content: msg.content,
+          sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'agent' : 'bot',
+          timestamp: new Date(msg.created_at),
+          ticket_id: ticketId,
+          author_name: msg.author_name
+        }))
 
-      setMessages(chatMessages)
-      setCurrentTicketId(ticketId)
-      setShowHistory(false)
+        setMessages(chatMessages)
+        setCurrentTicketId(ticketId)
+        setShowHistory(false)
+      } else {
+        setMessages([])
+        console.warn('Resposta da API não é um array:', ticketMessages)
+      }
     } catch (error) {
       console.error('Erro ao carregar mensagens do ticket:', error)
+      setMessages([])
     } finally {
       setIsLoading(false)
     }
@@ -236,7 +252,7 @@ export function ChatPage() {
             <MessageSquare className="w-4 h-4" />
             <span className="font-medium">Nova Conversa</span>
           </button>
-          {chatHistory.map((ticket) => (
+          {Array.isArray(chatHistory) && chatHistory.map((ticket) => (
             <button
               key={ticket.id}
               onClick={() => loadTicketMessages(ticket.id)}

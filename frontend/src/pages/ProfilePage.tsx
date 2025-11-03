@@ -160,7 +160,7 @@ export function ProfilePage() {
       errors.email = "Email inválido"
     }
     
-    if (profileData.phone && !/^[\d\s\(\)\-\+]+$/.test(profileData.phone)) {
+    if (profileData.phone && !/^[\d\s()\-+]+$/.test(profileData.phone)) {
       errors.phone = "Telefone inválido"
     }
     

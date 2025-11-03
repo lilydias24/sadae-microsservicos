@@ -114,7 +114,17 @@ export function SupportPage() {
   const [loading, setLoading] = useState(false)
 
   // Dashboard state
-  const [dashboardStats, setDashboardStats] = useState({
+  const [dashboardStats, setDashboardStats] = useState<{
+    total_tickets: number
+    open_tickets: number
+    in_progress_tickets: number
+    resolved_tickets: number
+    average_resolution_time: number
+    satisfaction_average: number
+    tickets_by_category: Array<{ category: string; count: number }>
+    tickets_by_priority: Array<any>
+    recent_tickets: Array<any>
+  }>({
     total_tickets: 0,
     open_tickets: 0,
     in_progress_tickets: 0,
@@ -181,8 +191,28 @@ export function SupportPage() {
     try {
       setLoading(true)
       const { data } = await api.get('/support/tickets')
-      // Garantir que data seja sempre um array
-      setTickets(Array.isArray(data) ? data : [])
+      // Garantir que data seja sempre um array e mapear os campos corretamente
+      const ticketsArray = Array.isArray(data) ? data : []
+      
+      // Mapear e normalizar os dados dos tickets
+      const normalizedTickets = ticketsArray.map((ticket: any) => ({
+        id: ticket.id,
+        ticket_number: ticket.ticket_number || `TKT-${ticket.id}` || '--',
+        title: ticket.title || 'Sem título',
+        description: ticket.description || 'Sem descrição',
+        category: ticket.category?.value || ticket.category || 'request',
+        priority: ticket.priority?.value || ticket.priority || 'medium',
+        status: ticket.status?.value || ticket.status || 'open',
+        client_name: ticket.client_name || ticket.client_name || 'Cliente',
+        client_email: ticket.client_email || '',
+        assigned_agent_name: ticket.assigned_agent_name || ticket.assigned_agent?.name || null,
+        created_at: ticket.created_at || new Date().toISOString(),
+        updated_at: ticket.updated_at || null,
+        satisfaction_rating: ticket.satisfaction_rating || null,
+        evaluation: ticket.evaluation || null
+      }))
+      
+      setTickets(normalizedTickets)
     } catch (error) {
       console.error('Error fetching tickets:', error)
       setTickets([]) // Definir array vazio em caso de erro
@@ -269,18 +299,92 @@ export function SupportPage() {
   const fetchDashboardStats = async () => {
     try {
       const { data } = await api.get('/support/dashboard')
-      setDashboardStats(data)
+      // Mapear a resposta da API para o formato esperado pelo frontend
+      const categoryMetrics = data.category_metrics || {}
+      const ticketsByCategory = [
+        { category: 'billing', count: categoryMetrics.billing || 0 },
+        { category: 'technical', count: categoryMetrics.technical || 0 },
+        { category: 'complaint', count: categoryMetrics.complaint || 0 },
+        { category: 'request', count: categoryMetrics.request || 0 },
+        { category: 'information', count: categoryMetrics.information || 0 },
+        { category: 'emergency', count: categoryMetrics.emergency || 0 }
+      ].filter(item => item.count > 0) // Apenas categorias com tickets
+      
+      setDashboardStats({
+        total_tickets: data.ticket_metrics?.total_tickets || 0,
+        open_tickets: data.ticket_metrics?.open_tickets || 0,
+        in_progress_tickets: data.ticket_metrics?.in_progress_tickets || 0,
+        resolved_tickets: data.ticket_metrics?.resolved_tickets || 0,
+        average_resolution_time: data.ticket_metrics?.average_resolution_time || 0,
+        satisfaction_average: data.ticket_metrics?.satisfaction_average || 0,
+        tickets_by_category: ticketsByCategory,
+        tickets_by_priority: [], // Não disponível na API atual
+        recent_tickets: Array.isArray(data.recent_tickets) ? data.recent_tickets : []
+      })
     } catch (error) {
       console.error('Error fetching dashboard stats:', error)
+      // Manter estado padrão em caso de erro
+      setDashboardStats({
+        total_tickets: 0,
+        open_tickets: 0,
+        in_progress_tickets: 0,
+        resolved_tickets: 0,
+        average_resolution_time: 0,
+        satisfaction_average: 0,
+        tickets_by_category: [],
+        tickets_by_priority: [],
+        recent_tickets: []
+      })
     }
   }
 
   const fetchAgentDashboardStats = async () => {
     try {
       const { data } = await api.get('/support/agent-dashboard')
-      setAgentDashboardStats(data)
+      // Garantir que todos os arrays sejam válidos
+      setAgentDashboardStats({
+        agent_info: data.agent_info || {
+          name: '',
+          satisfaction_rating: 0,
+          total_resolved: 0,
+          average_response_time: 0
+        },
+        my_tickets: data.my_tickets || {
+          total_assigned: 0,
+          open: 0,
+          in_progress: 0,
+          resolved_today: 0
+        },
+        daily_stats: data.daily_stats || {
+          new_tickets_today: 0,
+          pending_assignment: 0
+        },
+        recent_assigned: Array.isArray(data.recent_assigned) ? data.recent_assigned : [],
+        pending_tickets: Array.isArray(data.pending_tickets) ? data.pending_tickets : []
+      })
     } catch (error) {
       console.error('Error fetching agent dashboard stats:', error)
+      // Manter estado padrão em caso de erro
+      setAgentDashboardStats({
+        agent_info: {
+          name: '',
+          satisfaction_rating: 0,
+          total_resolved: 0,
+          average_response_time: 0
+        },
+        my_tickets: {
+          total_assigned: 0,
+          open: 0,
+          in_progress: 0,
+          resolved_today: 0
+        },
+        daily_stats: {
+          new_tickets_today: 0,
+          pending_assignment: 0
+        },
+        recent_assigned: [],
+        pending_tickets: []
+      })
     }
   }
 
@@ -300,7 +404,8 @@ export function SupportPage() {
     try {
       setLoading(true)
       const { data } = await api.post('/support/tickets', newTicket)
-      setTickets([data, ...tickets])
+      // Recarregar a lista de tickets para garantir que todos os dados estão atualizados
+      await fetchTickets()
       setNewTicket({ title: '', description: '', category: 'request', priority: 'medium' })
       setShowCreateTicket(false)
     } catch (error) {
@@ -416,7 +521,18 @@ export function SupportPage() {
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('pt-BR')
+    if (!dateString || dateString === 'Invalid Date') {
+      return 'Data não disponível'
+    }
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) {
+        return 'Data não disponível'
+      }
+      return date.toLocaleString('pt-BR')
+    } catch (error) {
+      return 'Data não disponível'
+    }
   }
 
   return (
@@ -514,63 +630,125 @@ export function SupportPage() {
               </div>
 
               {/* Tickets List */}
-              <div className="space-y-4">
-                {filteredTickets.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    onClick={() => {
-                      if (ticket.id) {
-                        setSelectedTicket(ticket)
-                        fetchTicketMessages(ticket.id)
-                      }
-                    }}
-                    className="bg-white p-6 rounded-lg shadow border hover:shadow-md transition-shadow cursor-pointer"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${categoryColors[ticket.category]}`}>
-                            {ticket.category}
-                          </span>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority]}`}>
-                            {ticket.priority}
-                          </span>
-                        </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">{ticket.title}</h3>
-                        <p className="text-gray-600 text-sm line-clamp-2">{ticket.description}</p>
-                        <div className="flex items-center space-x-4 mt-3 text-sm text-gray-500">
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="w-4 h-4" />
-                            <span>{formatDate(ticket.created_at)}</span>
+              <div className="space-y-3">
+                {loading ? (
+                  <div className="flex justify-center items-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-600">Carregando tickets...</span>
+                  </div>
+                ) : filteredTickets.length === 0 ? (
+                  <div className="bg-white p-12 rounded-lg shadow border text-center">
+                    <Ticket className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhum ticket encontrado</h3>
+                    <p className="text-gray-500 mb-4">
+                      {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
+                        ? 'Tente ajustar os filtros de busca'
+                        : 'Comece criando seu primeiro ticket'}
+                    </p>
+                    {!searchTerm && filterStatus === 'all' && filterCategory === 'all' && (
+                      <button
+                        onClick={() => setShowCreateTicket(true)}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2 mx-auto"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Criar Primeiro Ticket</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  filteredTickets.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      onClick={() => {
+                        if (ticket.id) {
+                          setSelectedTicket(ticket)
+                          fetchTicketMessages(ticket.id)
+                        }
+                      }}
+                      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer group"
+                    >
+                      <div className="p-5">
+                        {/* Header com número e badges */}
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center space-x-3 flex-1 min-w-0">
+                            <div className="flex-shrink-0">
+                              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+                                <Ticket className="w-5 h-5 text-blue-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center space-x-2 mb-1">
+                                <span className="font-mono text-sm font-semibold text-gray-700">
+                                  #{ticket.ticket_number || ticket.id}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${categoryColors[ticket.category] || 'bg-gray-100 text-gray-800'}`}>
+                                  {ticket.category}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${priorityColors[ticket.priority] || 'bg-gray-100 text-gray-800'}`}>
+                                  {ticket.priority}
+                                </span>
+                              </div>
+                              <h3 className="text-base font-semibold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                                {ticket.title}
+                              </h3>
+                            </div>
                           </div>
-                          {ticket.assigned_agent_name && (
+                          <div className="flex-shrink-0 ml-4">
+                            <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${statusColors[ticket.status] || 'bg-gray-100 text-gray-800'}`}>
+                              {getStatusIcon(ticket.status)}
+                              <span className="capitalize">{(ticket.status || '').replace('_', ' ')}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Descrição */}
+                        <p className="text-gray-600 text-sm line-clamp-2 mb-4 pl-[58px]">
+                          {ticket.description}
+                        </p>
+
+                        {/* Footer com informações adicionais */}
+                        <div className="flex items-center justify-between pt-3 border-t border-gray-100 pl-[58px]">
+                          <div className="flex items-center space-x-4 text-xs text-gray-500">
+                            <div className="flex items-center space-x-1.5">
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>
+                                {ticket.created_at && ticket.created_at !== 'Invalid Date' && !isNaN(new Date(ticket.created_at).getTime())
+                                  ? new Date(ticket.created_at).toLocaleDateString('pt-BR', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric'
+                                    })
+                                  : ticket.created_at || 'Data não disponível'}
+                              </span>
+                            </div>
+                            {ticket.assigned_agent_name && (
+                              <div className="flex items-center space-x-1.5">
+                                <User className="w-3.5 h-3.5" />
+                                <span className="truncate max-w-[120px]">{ticket.assigned_agent_name}</span>
+                              </div>
+                            )}
+                            {ticket.client_name && (
+                              <div className="flex items-center space-x-1.5">
+                                <Mail className="w-3.5 h-3.5" />
+                                <span className="truncate max-w-[150px]">{ticket.client_name}</span>
+                              </div>
+                            )}
+                          </div>
+                          {ticket.satisfaction_rating && (
                             <div className="flex items-center space-x-1">
-                              <User className="w-4 h-4" />
-                              <span>{ticket.assigned_agent_name}</span>
+                              {[...Array(5)].map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`w-3.5 h-3.5 ${i < ticket.satisfaction_rating! ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
+                                />
+                              ))}
                             </div>
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-col items-end space-y-2">
-                        <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm font-medium ${statusColors[ticket.status]}`}>
-                          {getStatusIcon(ticket.status)}
-                          <span>{(ticket.status || '').replace('_', ' ')}</span>
-                        </div>
-                        {ticket.satisfaction_rating && (
-                          <div className="flex items-center space-x-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`w-4 h-4 ${i < ticket.satisfaction_rating! ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </>
           ) : (
@@ -1070,7 +1248,7 @@ export function SupportPage() {
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Tempo Médio de Resolução</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {dashboardStats.average_resolution_time.toFixed(1)} horas
+                        {(dashboardStats.average_resolution_time || 0).toFixed(1)} horas
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -1080,12 +1258,12 @@ export function SupportPage() {
                           {[...Array(5)].map((_, i) => (
                             <Star
                               key={i}
-                              className={`w-4 h-4 ${i < Math.floor(dashboardStats.satisfaction_average) ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
+                              className={`w-4 h-4 ${i < Math.floor(dashboardStats.satisfaction_average || 0) ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
                             />
                           ))}
                         </div>
                         <span className="text-sm font-medium text-gray-900">
-                          {dashboardStats.satisfaction_average.toFixed(1)}
+                          {(dashboardStats.satisfaction_average || 0).toFixed(1)}
                         </span>
                       </div>
                     </div>
@@ -1095,14 +1273,18 @@ export function SupportPage() {
                 <div className="bg-white p-6 rounded-lg shadow border">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Distribuição por Categoria</h3>
                   <div className="space-y-3">
-                    {dashboardStats.tickets_by_category.map((item: any) => (
-                      <div key={item.category} className="flex justify-between items-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${categoryColors[item.category]}`}>
-                          {item.category}
-                        </span>
-                        <span className="text-sm font-medium text-gray-900">{item.count}</span>
-                      </div>
-                    ))}
+                    {Array.isArray(dashboardStats.tickets_by_category) && dashboardStats.tickets_by_category.length > 0 ? (
+                      dashboardStats.tickets_by_category.map((item: any) => (
+                        <div key={item.category} className="flex justify-between items-center">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${categoryColors[item.category] || 'bg-gray-100 text-gray-800'}`}>
+                            {item.category}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900">{item.count}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">Nenhuma categoria com tickets registrada</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1113,39 +1295,45 @@ export function SupportPage() {
                   <h3 className="text-lg font-semibold text-gray-900">Tickets Recentes</h3>
                 </div>
                 <div className="divide-y divide-gray-200">
-                  {dashboardStats.recent_tickets.slice(0, 5).map((ticket: any) => (
-                    <div key={ticket.id} className="px-6 py-4 hover:bg-gray-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-3">
-                            <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status]}`}>
-                              {(ticket.status || '').replace('_', ' ')}
-                            </span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority]}`}>
-                              {ticket.priority}
-                            </span>
+                  {Array.isArray(dashboardStats.recent_tickets) && dashboardStats.recent_tickets.length > 0 ? (
+                    dashboardStats.recent_tickets.slice(0, 5).map((ticket: any) => (
+                      <div key={ticket.id} className="px-6 py-4 hover:bg-gray-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center space-x-3">
+                              <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status] || 'bg-gray-100 text-gray-800'}`}>
+                                {(ticket.status || '').replace('_', ' ')}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority] || 'bg-gray-100 text-gray-800'}`}>
+                                {ticket.priority}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-900 mt-1 truncate">{ticket.title}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {ticket.client_name} • {formatDate(ticket.created_at)}
+                            </p>
                           </div>
-                          <p className="text-sm text-gray-900 mt-1 truncate">{ticket.title}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {ticket.client_name} • {formatDate(ticket.created_at)}
-                          </p>
+                          <button
+                            onClick={() => {
+                              if (ticket.id) {
+                                setSelectedTicket(ticket)
+                                setActiveTab('tickets')
+                                fetchTicketMessages(ticket.id)
+                              }
+                            }}
+                            className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                          >
+                            Ver
+                          </button>
                         </div>
-                        <button
-                          onClick={() => {
-                            if (ticket.id) {
-                              setSelectedTicket(ticket)
-                              setActiveTab('tickets')
-                              fetchTicketMessages(ticket.id)
-                            }
-                          }}
-                          className="ml-4 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          Ver
-                        </button>
                       </div>
+                    ))
+                  ) : (
+                    <div className="px-6 py-8 text-center text-gray-500">
+                      <p>Nenhum ticket recente encontrado</p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             </>
