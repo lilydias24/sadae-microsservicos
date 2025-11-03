@@ -12,8 +12,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import and_, or_, desc, func
 from sqlalchemy.orm import Session
 
-# Add shared modules to path
-sys.path.insert(0, '/app/shared')
+# Add shared modules to path (use append to keep local imports priority)
+sys.path.append('/app/shared')
 
 # Import shared modules with error handling
 try:
@@ -120,6 +120,15 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
+# Test endpoint without auth
+@router.get("/test")
+async def test_endpoint():
+    """Test endpoint without authentication"""
+    return {
+        "message": "Test endpoint working!",
+        "timestamp": datetime.now().isoformat()
+    }
+
 # ==================== SERVICE ORDER MANAGEMENT ====================
 
 @router.post("/orders", response_model=ServiceOrderResponse)
@@ -163,18 +172,20 @@ async def create_service_order(
 
 @router.get("/orders", response_model=List[ServiceOrderResponse])
 async def get_service_orders(
-    status: Optional[ServiceOrderStatus] = None,
-    priority: Optional[AlertLevel] = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
     team: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    limit: int = 100
 ):
     """Get service orders with filters"""
     try:
+        print(f"🔍 get_service_orders called with status={status}, priority={priority}, team={team}")
         # ✅ Esta função JÁ É async, então pode usar await
         user = await verify_user_token(f"Bearer {credentials.credentials}")
+        print(f"✅ User authenticated: {user}")
         
         # Query principal
         query = db.query(ServiceOrder)
@@ -189,13 +200,16 @@ async def get_service_orders(
         
         # Executar query
         orders = query.offset(skip).limit(limit).all()
+        print(f"✅ Found {len(orders)} orders")
         
         return orders
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in get_service_orders: {e}")
+        print(f"❌ Error in get_service_orders: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -461,12 +475,12 @@ async def get_public_complaint_status(
 
 @router.get("/complaints", response_model=List[ComplaintResponse])
 async def get_complaints(
-    status: Optional[ComplaintStatus] = None,
-    category: Optional[ComplaintCategory] = None,
-    skip: int = 0,
-    limit: int = 100,
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100
 ):
     """Get maintenance complaints"""
     try:
@@ -632,11 +646,11 @@ async def delete_team_member(
 
 @router.get("/teams", response_model=List[TeamResponse])
 async def get_teams(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
     active_only: bool = True,
     skip: int = 0,
-    limit: int = 100,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    limit: int = 100
 ):
     """Get maintenance teams"""
     try:
@@ -658,6 +672,15 @@ async def get_teams(
             team.status = (
                 "available" if team.is_active and current_workload < (team.max_concurrent_orders or 0) else "busy"
             )
+            
+            # Fix work_areas and equipment if they are PostgreSQL array strings
+            if isinstance(team.work_areas, str):
+                # Convert PostgreSQL array string like '{string}' to Python list
+                team.work_areas = team.work_areas.strip('{}').split(',') if team.work_areas and team.work_areas != '{}' else []
+            if isinstance(team.equipment, str):
+                # Convert PostgreSQL array string like '{teste}' to Python list
+                team.equipment = team.equipment.strip('{}').split(',') if team.equipment and team.equipment != '{}' else []
+            
             members = db.query(TeamMember).filter(TeamMember.team_id == team.id, TeamMember.is_active == True).all()
             # Attach simple members list for response
             team.members = [
