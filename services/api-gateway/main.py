@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
@@ -45,10 +46,14 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # broadened for local dev to avoid CORS blocks
-    allow_credentials=False,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 security = HTTPBearer()
@@ -723,14 +728,16 @@ async def proxy_request(request: Request, service: str, path: str):
         headers["Authorization"] = request.headers.get("authorization")
     
     async with httpx.AsyncClient() as client:
-        response = await client.request(
+        upstream = await client.request(
             method=method,
             url=f"{service_registry.get_service_url(service)}{path}",
             content=body,
             headers=headers,
             params=dict(request.query_params)
         )
-        return response.json()
+        # Return raw response preserving status and content type to avoid JSON decode issues
+        media_type = upstream.headers.get("content-type", "application/json")
+        return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
 
 # Generic routes for any missing endpoints
 @app.api_route("/billing/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
