@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { 
@@ -20,7 +21,8 @@ import {
   Send,
   Paperclip,
   Eye,
-  EyeOff
+  EyeOff,
+  MessageCircle
 } from 'lucide-react'
 
 interface SupportTicket {
@@ -421,15 +423,24 @@ export function SupportPage() {
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-900">Atendimento ao Cliente</h1>
-        {activeTab === 'tickets' && (
-          <button
-            onClick={() => setShowCreateTicket(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+        <div className="flex items-center space-x-3">
+          <Link
+            to="/chat"
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2 transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            <span>Novo Ticket</span>
-          </button>
-        )}
+            <MessageCircle className="w-4 h-4" />
+            <span>Chat em Tempo Real</span>
+          </Link>
+          {activeTab === 'tickets' && (
+            <button
+              onClick={() => setShowCreateTicket(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Novo Ticket</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
