@@ -164,18 +164,8 @@ async def get_test_data(db: Session = Depends(get_db)):
     tags=["Clientes"]
 )
 async def create_customer(
-    customer_data: CustomerCreate = Body(
-        ...,
-        example={
-            "name": "João da Silva",
-            "document": "12345678900",
-            "email": "joao.silva@email.com",
-            "phone": "(55) 99999-9999",
-            "address": "Rua das Flores, 123, Centro, São Paulo - SP",
-            "customer_type": "residential"
-        }
-    ),
     req: Request,
+    customer_data: CustomerCreate,
     db: Session = Depends(get_db)
 ):
     """
@@ -661,15 +651,8 @@ async def generate_bills(
     tags=["Contestações"]
 )
 async def create_bill_contest(
-    contest_data: BillContestCreate = Body(
-        ...,
-        example={
-            "bill_id": 123,
-            "reason": "Fatura cobrada mesmo com imóvel desocupado durante todo o período",
-            "description": "O imóvel estava desocupado de 01/01/2025 a 31/01/2025, mas foi gerada fatura de consumo."
-        }
-    ),
     req: Request,
+    contest_data: BillContestCreate,
     db: Session = Depends(get_db)
 ):
     """
@@ -886,16 +869,7 @@ async def resolve_bill_contest(
     tags=["Negociações"]
 )
 async def create_debt_negotiation(
-    negotiation_data: DebtNegotiationCreate = Body(
-        ...,
-        example={
-            "customer_id": 5,
-            "installments": 6,
-            "installment_amount": 150.50,
-            "discount_percentage": 5.0,
-            "interest_rate": 0.0
-        }
-    ),
+    negotiation_data: DebtNegotiationCreate,
     db: Session = Depends(get_db),
     authorization: str = Depends(lambda request: request.headers.get("Authorization"))
 ):
