@@ -17,28 +17,34 @@ export const DashboardPage: React.FC = () => {
   // Estados para dados do sensor simulator
   const [realtimeReadings, setRealtimeReadings] = useState<any[]>([])
 
-  // Buscar dados do sensor simulator
+  // Carregar dados iniciais via HTTP (apenas uma vez)
   useEffect(() => {
-    let cancelled = false
-    const loadSensorData = async () => {
+    const loadInitialData = async () => {
       try {
-        console.log("🔍 Buscando dados do sensor simulator...")
+        console.log("🔍 Carregando dados iniciais dos sensores...")
         const realtime = await monitoringDev.getRealtimeReadings()
-        console.log("📊 Dados recebidos:", realtime.data)
-        if (!cancelled) {
-          const readings = realtime.data?.readings || []
-          console.log("✅ Definindo readings:", readings.length, "sensores")
-          setRealtimeReadings(readings)
-        }
+        const readings = realtime.data?.readings || []
+        console.log("✅ Dados iniciais carregados:", readings.length, "sensores")
+        setRealtimeReadings(readings)
       } catch (error) {
-        console.log("❌ Erro ao carregar dados dos sensores:", error)
+        console.log("❌ Erro ao carregar dados iniciais:", error)
       }
     }
     
-    loadSensorData()
-    const interval = setInterval(loadSensorData, 5000)
-    return () => { cancelled = true; clearInterval(interval) }
+    loadInitialData()
   }, [])
+
+  // Atualizar com dados do WebSocket em tempo real
+  useEffect(() => {
+    if (sensorData && sensorData.length > 0) {
+      console.log("📡 WebSocket: Atualizando dados em tempo real!", sensorData.length, "leituras")
+      setRealtimeReadings(prev => {
+        // Adicionar novas leituras do WebSocket
+        const newReadings = [...sensorData]
+        return newReadings
+      })
+    }
+  }, [sensorData])
 
   // Financial data queries for financial_manager role
   const { data: bills = [] } = useQuery({
@@ -113,6 +119,17 @@ export const DashboardPage: React.FC = () => {
     if (hour < 12) return "Bom dia"
     if (hour < 18) return "Boa tarde"
     return "Boa noite"
+  }
+
+  const translateSeverity = (severity: string | undefined): string => {
+    if (!severity) return "Médio"
+    const severityMap: { [key: string]: string } = {
+      low: "Baixo",
+      medium: "Médio",
+      high: "Alto",
+      critical: "Crítico"
+    }
+    return severityMap[severity.toLowerCase()] || severity
   }
 
   const getRoleSpecificStats = () => {
@@ -379,12 +396,15 @@ export const DashboardPage: React.FC = () => {
                 </div>
                 <span
                   className={`px-2 py-1 text-xs rounded-full ${
-                    alert.severity === "high" || alert.urgency_level === "high"
+                    alert.severity === "high" || alert.severity === "critical" || 
+                    alert.urgency_level === "high" || alert.urgency_level === "critical"
                       ? "bg-red-100 text-red-800"
-                      : "bg-yellow-100 text-yellow-800"
+                      : alert.severity === "medium" || alert.urgency_level === "medium"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : "bg-blue-100 text-blue-800"
                   }`}
                 >
-                  {alert.severity || alert.urgency_level || "Médio"}
+                  {translateSeverity(alert.severity || alert.urgency_level)}
                 </span>
               </div>
             ))}

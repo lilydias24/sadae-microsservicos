@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Request, Body, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pydantic import Field
 import sys
 import os
 
@@ -120,13 +121,58 @@ async def get_test_data(db: Session = Depends(get_db)):
     }
 
 # Customer Management
-@router.post("/customers", response_model=CustomerResponse)
+@router.post(
+    "/customers",
+    response_model=CustomerResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Criar novo cliente",
+    description="""
+    Cria um novo cliente no sistema.
+    
+    **Requisitos:**
+    - Apenas usuários com role `financial_manager` podem criar clientes
+    - O documento (CPF/CNPJ) deve ser único no sistema
+    
+    **Validações:**
+    - Email deve ser válido
+    - Documento deve ter entre 11 e 14 caracteres (apenas números)
+    - Tipo de cliente deve ser: residential, commercial ou industrial
+    - Nome deve ter entre 3 e 200 caracteres
+    """,
+    responses={
+        201: {
+            "description": "Cliente criado com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "name": "João da Silva",
+                        "document": "12345678900",
+                        "email": "joao.silva@email.com",
+                        "phone": "(55) 99999-9999",
+                        "address": "Rua das Flores, 123, Centro, São Paulo - SP",
+                        "customer_type": "residential",
+                        "user_id": None,
+                        "is_active": True,
+                        "created_at": "2025-01-15T10:30:00",
+                        "updated_at": "2025-01-15T10:30:00"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Clientes"]
+)
 async def create_customer(
-    customer_data: CustomerCreate,
     req: Request,
+    customer_data: CustomerCreate,
     db: Session = Depends(get_db)
 ):
-    """Create customer (financial manager only)"""
+    """
+    Cria um novo cliente no sistema.
+    
+    Requer permissões de financial_manager.
+    """
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
@@ -144,14 +190,56 @@ async def create_customer(
     
     return customer
 
-@router.get("/customers", response_model=List[CustomerResponse])
+@router.get(
+    "/customers",
+    response_model=List[CustomerResponse],
+    summary="Listar clientes",
+    description="""
+    Lista todos os clientes do sistema com paginação.
+    
+    **Requisitos:**
+    - Apenas usuários com role `financial_manager` podem ver todos os clientes
+    
+    **Paginação:**
+    - Use `skip` para pular registros (padrão: 0)
+    - Use `limit` para limitar resultados (padrão: 100, máximo: 1000)
+    """,
+    responses={
+        200: {
+            "description": "Lista de clientes retornada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "name": "João da Silva",
+                            "document": "12345678900",
+                            "email": "joao.silva@email.com",
+                            "phone": "(55) 99999-9999",
+                            "address": "Rua das Flores, 123",
+                            "customer_type": "residential",
+                            "is_active": True,
+                            "created_at": "2025-01-15T10:30:00",
+                            "updated_at": "2025-01-15T10:30:00"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    tags=["Clientes"]
+)
 async def get_customers(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Field(0, description="Número de registros para pular (paginação)", ge=0, example=0),
+    limit: int = Field(100, description="Número máximo de registros a retornar", ge=1, le=1000, example=100),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
-    """Get customers (financial manager only)"""
+    """
+    Lista todos os clientes com paginação.
+    
+    Requer permissões de financial_manager.
+    """
     user = await verify_user_token(authorization)
     if user["role"] != UserRole.FINANCIAL_MANAGER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -159,13 +247,51 @@ async def get_customers(
     customers = db.query(Customer).offset(skip).limit(limit).all()
     return customers
 
-@router.get("/customers/{customer_id}", response_model=CustomerResponse)
+@router.get(
+    "/customers/{customer_id}",
+    response_model=CustomerResponse,
+    summary="Buscar cliente por ID",
+    description="""
+    Busca um cliente específico pelo seu ID.
+    
+    **Permissões:**
+    - `financial_manager`: pode ver qualquer cliente
+    - `citizen`: pode ver apenas seus próprios dados
+    """,
+    responses={
+        200: {
+            "description": "Cliente encontrado com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "name": "João da Silva",
+                        "document": "12345678900",
+                        "email": "joao.silva@email.com",
+                        "phone": "(55) 99999-9999",
+                        "address": "Rua das Flores, 123, Centro, São Paulo - SP",
+                        "customer_type": "residential",
+                        "user_id": None,
+                        "is_active": True,
+                        "created_at": "2025-01-15T10:30:00",
+                        "updated_at": "2025-01-15T10:30:00"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Clientes"]
+)
 async def get_customer(
-    customer_id: int,
+    customer_id: int = Field(..., description="ID do cliente", example=1, gt=0),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
-    """Get customer by ID"""
+    """
+    Busca um cliente específico pelo ID.
+    
+    Cidadãos podem ver apenas seus próprios dados.
+    """
     user = await verify_user_token(authorization)
     
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
@@ -311,16 +437,68 @@ async def get_meter_readings(
     return {"readings": readings}
 
 # Bill Management
-@router.get("/bills", response_model=List[BillResponse])
+@router.get(
+    "/bills",
+    response_model=List[BillResponse],
+    summary="Listar faturas",
+    description="""
+    Lista faturas do sistema com filtros opcionais.
+    
+    **Permissões:**
+    - `financial_manager`: pode ver todas as faturas
+    - `citizen`: pode ver apenas suas próprias faturas
+    
+    **Filtros disponíveis:**
+    - `customer_id`: filtrar por cliente específico
+    - `status`: filtrar por status (pending, paid, overdue, contested)
+    - `skip` e `limit`: paginação
+    
+    **Status possíveis:**
+    - `pending`: Fatura pendente de pagamento
+    - `paid`: Fatura paga
+    - `overdue`: Fatura vencida
+    - `contested`: Fatura contestada
+    """,
+    responses={
+        200: {
+            "description": "Lista de faturas retornada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "customer_id": 5,
+                            "meter_id": "WM-001",
+                            "amount": 125.75,
+                            "consumption": 25.5,
+                            "billing_period_start": "2025-01-01T00:00:00",
+                            "billing_period_end": "2025-01-31T23:59:59",
+                            "due_date": "2025-02-15T23:59:59",
+                            "status": "pending",
+                            "paid_at": None,
+                            "created_at": "2025-01-15T10:00:00"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    tags=["Faturas"]
+)
 async def get_bills(
     request: Request,
-    customer_id: Optional[int] = None,
-    status: Optional[BillStatus] = None,
-    skip: int = 0,
-    limit: int = 100,
+    customer_id: Optional[int] = Field(None, description="ID do cliente para filtrar faturas", example=5),
+    status: Optional[BillStatus] = Field(None, description="Status da fatura: pending, paid, overdue, contested", example="pending"),
+    skip: int = Field(0, description="Número de registros para pular", ge=0, example=0),
+    limit: int = Field(100, description="Número máximo de registros", ge=1, le=1000, example=100),
     db: Session = Depends(get_db)
 ):
-    """Get bills"""
+    """
+    Lista faturas com filtros opcionais.
+    
+    Cidadãos veem apenas suas próprias faturas.
+    Gestores financeiros veem todas as faturas.
+    """
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
@@ -342,13 +520,51 @@ async def get_bills(
     bills = query.order_by(Bill.due_date.desc()).offset(skip).limit(limit).all()
     return bills
 
-@router.get("/bills/{bill_id}", response_model=BillResponse)
+@router.get(
+    "/bills/{bill_id}",
+    response_model=BillResponse,
+    summary="Buscar fatura por ID",
+    description="""
+    Busca uma fatura específica pelo seu ID.
+    
+    **Permissões:**
+    - `financial_manager`: pode ver qualquer fatura
+    - `citizen`: pode ver apenas suas próprias faturas
+    """,
+    responses={
+        200: {
+            "description": "Fatura encontrada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "customer_id": 5,
+                        "meter_id": "WM-001",
+                        "amount": 125.75,
+                        "consumption": 25.5,
+                        "billing_period_start": "2025-01-01T00:00:00",
+                        "billing_period_end": "2025-01-31T23:59:59",
+                        "due_date": "2025-02-15T23:59:59",
+                        "status": "pending",
+                        "paid_at": None,
+                        "created_at": "2025-01-15T10:00:00"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Faturas"]
+)
 async def get_bill(
-    bill_id: int,
+    bill_id: int = Field(..., description="ID da fatura", example=1, gt=0),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
-    """Get bill by ID"""
+    """
+    Busca uma fatura específica pelo ID.
+    
+    Cidadãos podem ver apenas suas próprias faturas.
+    """
     user = await verify_user_token(authorization)
     
     bill = db.query(Bill).filter(Bill.id == bill_id).first()
@@ -390,13 +606,61 @@ async def generate_bills(
     return {"message": f"Generated {generated_count} bills for {month}/{year}"}
 
 # Bill Contest Management
-@router.post("/contests", response_model=BillContestResponse)
+@router.post(
+    "/contests",
+    response_model=BillContestResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Contestar fatura",
+    description="""
+    Cria uma contestação para uma fatura.
+    
+    **Quem pode contestar:**
+    - Cidadãos (citizens) podem contestar apenas suas próprias faturas
+    - Um número de protocolo é gerado automaticamente
+    
+    **Validações:**
+    - A fatura deve existir e pertencer ao usuário
+    - Não pode haver contestação duplicada para a mesma fatura
+    - O motivo da contestação deve ter no mínimo 10 caracteres
+    
+    **Resultado:**
+    - A fatura terá seu status alterado para "contested"
+    - Um protocolo único é gerado para acompanhamento
+    """,
+    responses={
+        201: {
+            "description": "Contestação criada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "bill_id": 123,
+                        "protocol_number": "PROT123456",
+                        "reason": "Fatura cobrada mesmo com imóvel desocupado durante todo o período",
+                        "description": "O imóvel estava desocupado de 01/01/2025 a 31/01/2025.",
+                        "status": "pending",
+                        "resolution": None,
+                        "resolved_at": None,
+                        "resolved_by": None,
+                        "created_at": "2025-01-15T14:30:00"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Contestações"]
+)
 async def create_bill_contest(
-    contest_data: BillContestCreate,
     req: Request,
+    contest_data: BillContestCreate,
     db: Session = Depends(get_db)
 ):
-    """Contest a bill (citizen only)"""
+    """
+    Contesta uma fatura.
+    
+    Cidadãos podem contestar apenas suas próprias faturas.
+    Um protocolo é gerado automaticamente para acompanhamento.
+    """
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
@@ -432,15 +696,58 @@ async def create_bill_contest(
     
     return contest
 
-@router.get("/contests", response_model=List[BillContestResponse])
+@router.get(
+    "/contests",
+    response_model=List[BillContestResponse],
+    summary="Listar contestações",
+    description="""
+    Lista contestações de faturas com filtros opcionais.
+    
+    **Permissões:**
+    - `financial_manager`: pode ver todas as contestações
+    - `citizen`: pode ver apenas suas próprias contestações
+    
+    **Filtros:**
+    - `status`: filtrar por status (pending, approved, rejected)
+    - `skip` e `limit`: paginação
+    """,
+    responses={
+        200: {
+            "description": "Lista de contestações retornada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "bill_id": 123,
+                            "protocol_number": "PROT123456",
+                            "reason": "Fatura cobrada mesmo com imóvel desocupado",
+                            "description": "O imóvel estava desocupado no período.",
+                            "status": "pending",
+                            "resolution": None,
+                            "resolved_at": None,
+                            "resolved_by": None,
+                            "created_at": "2025-01-15T14:30:00"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    tags=["Contestações"]
+)
 async def get_bill_contests(
     request: Request,
-    status: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    status: Optional[str] = Field(None, description="Status da contestação: pending, approved, rejected", example="pending"),
+    skip: int = Field(0, description="Número de registros para pular", ge=0, example=0),
+    limit: int = Field(100, description="Número máximo de registros", ge=1, le=1000, example=100),
     db: Session = Depends(get_db)
 ):
-    """Get bill contests"""
+    """
+    Lista contestações de faturas.
+    
+    Cidadãos veem apenas suas próprias contestações.
+    """
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
@@ -508,13 +815,70 @@ async def resolve_bill_contest(
         raise
 
 # Debt Negotiation
-@router.post("/negotiations", response_model=DebtNegotiationResponse)
+@router.post(
+    "/negotiations",
+    response_model=DebtNegotiationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Criar negociação de débito",
+    description="""
+    Cria uma proposta de negociação de débito para um cliente.
+    
+    **Requisitos:**
+    - Apenas usuários com role `financial_manager` podem criar negociações
+    - O cliente não pode ter uma negociação ativa já em andamento
+    
+    **Como funciona:**
+    - O sistema calcula automaticamente o débito total (todas as faturas vencidas)
+    - O desconto pode ser aplicado conforme o número de parcelas
+    - Taxa de juros pode ser aplicada para parcelamentos longos (acima de 12 parcelas)
+    
+    **Regras de desconto:**
+    - 1 parcela: 15% de desconto
+    - 2 parcelas: 10% de desconto
+    - 3 parcelas: 8% de desconto
+    - 6 parcelas: 5% de desconto
+    - 12 parcelas: 2% de desconto
+    - Acima de 12 parcelas: sem desconto, com juros de 1% ao mês
+    
+    **Status da negociação:**
+    - Inicialmente criada com status "proposed"
+    - Precisa ser aprovada pelo gestor financeiro para entrar em vigor
+    """,
+    responses={
+        201: {
+            "description": "Negociação criada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "customer_id": 5,
+                        "total_debt": 1250.00,
+                        "installments": 6,
+                        "installment_amount": 150.50,
+                        "discount_percentage": 5.0,
+                        "interest_rate": 0.0,
+                        "status": "proposed",
+                        "start_date": None,
+                        "created_at": "2025-01-15T10:30:00",
+                        "updated_at": "2025-01-15T10:30:00"
+                    }
+                }
+            }
+        }
+    },
+    tags=["Negociações"]
+)
 async def create_debt_negotiation(
     negotiation_data: DebtNegotiationCreate,
     db: Session = Depends(get_db),
     authorization: str = Depends(lambda request: request.headers.get("Authorization"))
 ):
-    """Create debt negotiation (financial manager only)"""
+    """
+    Cria uma proposta de negociação de débito.
+    
+    Apenas financial_manager pode criar negociações.
+    O sistema calcula automaticamente o débito total baseado nas faturas vencidas.
+    """
     print(f"🔍 Creating negotiation - Data: {negotiation_data}")
     
     try:
@@ -563,14 +927,64 @@ async def create_debt_negotiation(
         print(f"❌ Error type: {type(e)}")
         raise
 
-@router.get("/negotiations", response_model=List[DebtNegotiationResponse])
+@router.get(
+    "/negotiations",
+    response_model=List[DebtNegotiationResponse],
+    summary="Listar negociações de débito",
+    description="""
+    Lista negociações de débito com filtros opcionais.
+    
+    **Permissões:**
+    - `financial_manager`: pode ver todas as negociações
+    - `citizen`: pode ver apenas suas próprias negociações
+    
+    **Filtros:**
+    - `customer_id`: filtrar por cliente específico
+    - `status`: filtrar por status (proposed, active, cancelled, completed)
+    
+    **Status possíveis:**
+    - `proposed`: Negociação proposta, aguardando aprovação
+    - `active`: Negociação aprovada e em andamento
+    - `cancelled`: Negociação cancelada
+    - `completed`: Negociação concluída
+    """,
+    responses={
+        200: {
+            "description": "Lista de negociações retornada com sucesso",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "customer_id": 5,
+                            "total_debt": 1250.00,
+                            "installments": 6,
+                            "installment_amount": 150.50,
+                            "discount_percentage": 5.0,
+                            "interest_rate": 0.0,
+                            "status": "proposed",
+                            "start_date": None,
+                            "created_at": "2025-01-15T10:30:00",
+                            "updated_at": "2025-01-15T10:30:00"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    tags=["Negociações"]
+)
 async def get_debt_negotiations(
     request: Request,
-    customer_id: Optional[int] = None,
-    status: Optional[str] = None,
+    customer_id: Optional[int] = Field(None, description="ID do cliente para filtrar negociações", example=5),
+    status: Optional[str] = Field(None, description="Status da negociação: proposed, active, cancelled, completed", example="proposed"),
     db: Session = Depends(get_db)
 ):
-    """Get debt negotiations"""
+    """
+    Lista negociações de débito.
+    
+    Cidadãos veem apenas suas próprias negociações.
+    """
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
     

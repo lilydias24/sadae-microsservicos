@@ -70,7 +70,7 @@ export const monitoringService = {
 }
 
 // Acesso direto ao monitoring-service (bypass gateway) para desenvolvimento
-const monitoringDirect = axios.create({ baseURL: "http://localhost:8002", timeout: 10000 })
+const monitoringDirect = axios.create({ baseURL: "http://localhost:8003", timeout: 10000 })
 
 export const monitoringDev = {
   getRealtimeReadings(): Promise<AxiosResponse<{ readings: any[]; timestamp: string }>> {

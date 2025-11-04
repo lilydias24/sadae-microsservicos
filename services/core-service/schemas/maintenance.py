@@ -89,6 +89,19 @@ class ServiceOrderProgress(BaseModel):
     progress_notes: str = Field(..., min_length=5, max_length=1000)
     estimated_completion: Optional[datetime] = None
 
+class ServiceOrderProgressResponse(BaseModel):
+    id: int
+    service_order_id: int
+    status: ServiceOrderStatus
+    progress_notes: str
+    estimated_completion: Optional[datetime] = None
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 # ==================== MAINTENANCE SCHEMAS ====================
 
 class MaintenanceBase(BaseModel):
@@ -240,6 +253,7 @@ class TeamUpdate(BaseModel):
 
 class TeamResponse(TeamBase):
     id: int
+    status: Optional[str] = None
     supervisor_name: Optional[str] = None
     supervisor_contact: Optional[str] = None
     is_active: bool = True
@@ -250,6 +264,33 @@ class TeamResponse(TeamBase):
     completed_orders: int = 0
     created_at: datetime
     updated_at: datetime
+    members: Optional[List[Dict[str, Any]]] = None
+    
+    class Config:
+        from_attributes = True
+
+# ==================== TEAM MEMBER SCHEMAS ====================
+
+class TeamMemberBase(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    role: Optional[str] = Field(None, max_length=100)
+    contact: Optional[str] = Field(None, max_length=200)
+    is_active: bool = True
+
+class TeamMemberCreate(TeamMemberBase):
+    pass
+
+class TeamMemberUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=100)
+    role: Optional[str] = Field(None, max_length=100)
+    contact: Optional[str] = Field(None, max_length=200)
+    is_active: Optional[bool] = None
+
+class TeamMemberResponse(TeamMemberBase):
+    id: int
+    team_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
