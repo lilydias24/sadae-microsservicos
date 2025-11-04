@@ -9,6 +9,12 @@ import { Layout } from "./components/Layout"
 import { LoginPage } from "./pages/LoginPage"
 import { DashboardPage } from "./pages/DashboardPage"
 import { BillingPage } from "./pages/BillingPage"
+import { MaintenancePage } from "./pages/MaintenancePage"
+import { MonitoringPage } from "./pages/MonitoringPage"
+import { SupportPage } from "./pages/SupportPage"
+import { ChatPage } from "./pages/ChatPage"
+import { ProfilePage } from "./pages/ProfilePage"
+import { ReportsPage } from "./pages/ReportsPage"
 
 import "./index.css"
 
@@ -60,6 +66,66 @@ function App() {
                     <ProtectedRoute>
                       <Layout>
                         <BillingPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/maintenance"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MaintenancePage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/monitoring"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <MonitoringPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/support"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <SupportPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/chat"
+                  element={
+                    <ProtectedRoute>
+                      <Layout showChatWidget={false}>
+                        <ChatPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <ProfilePage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/reports"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <ReportsPage />
                       </Layout>
                     </ProtectedRoute>
                   }
