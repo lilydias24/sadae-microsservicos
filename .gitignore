@@ -36,6 +36,10 @@ next-env.d.ts
 # Docker
 docker-compose.override.yml
 .docker/
+<<<<<<< HEAD
+=======
+
+>>>>>>> 973cef12643c8d5dbc90258fbad7d45d017c891c
 # Python
 __pycache__/
 *.py[cod]
@@ -61,6 +65,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+<<<<<<< HEAD
 # PyInstaller
 *.manifest
 *.spec
@@ -377,6 +382,29 @@ dump.rdb
 /rpiv_project04/uploads/
 /rpiv_project04/backups/
 =======
+=======
+# Database
+*.db
+*.sqlite3
+*.sql
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+>>>>>>> 973cef12643c8d5dbc90258fbad7d45d017c891c
 # Logs
 logs
 *.log
@@ -411,4 +439,8 @@ jspm_packages/
 *.tgz
 
 # Yarn Integrity file
+<<<<<<< HEAD
 .yarn-integrity
+=======
+.yarn-integrity
+>>>>>>> 973cef12643c8d5dbc90258fbad7d45d017c891c
