@@ -724,6 +724,18 @@ async def report_leak(request: Request):
         )
         return response.json()
 
+@app.options("/support/{path:path}")
+async def support_options(path: str):
+    """Handle CORS preflight for support routes"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 # Support service routes
 @app.get("/support/health")
 async def support_health_check():
