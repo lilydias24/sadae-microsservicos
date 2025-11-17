@@ -136,16 +136,23 @@ class ChatConnectionManager:
 # Instância global do gerenciador
 chat_manager = ChatConnectionManager()
 
-async def verify_user_token(authorization: str) -> dict:
-    """Verify JWT token and return user info"""
-    if not authorization or not authorization.startswith("Bearer "):
+def verify_user_token(token: str) -> dict:
+    """Verify JWT token and return user info
+    
+    Args:
+        token: JWT token (without 'Bearer ' prefix) or full 'Bearer token' string
+    """
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token não fornecido"
         )
     
-    token = authorization.split(" ")[1]
-    user = await verify_token(token)
+    # Remove 'Bearer ' prefix if present
+    if token.startswith("Bearer "):
+        token = token.split(" ", 1)[1]
+    
+    user = verify_token(token)
     return user
 
 def generate_ticket_number() -> str:
@@ -181,7 +188,7 @@ async def create_ticket(
     db: Session = Depends(get_db)
 ):
     """Create new support ticket"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = SupportTicket(
         ticket_number=generate_ticket_number(),
@@ -227,14 +234,14 @@ async def get_tickets(
     db: Session = Depends(get_db)
 ):
     """Get tickets with filters"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     query = db.query(SupportTicket)
     
     # Apply filters based on user role
     if user["role"] == UserRole.CITIZEN:
         query = query.filter(SupportTicket.client_id == user["id"])
-    elif user["role"] in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
+    elif user["role"] in [UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
         # These roles can see all tickets
         pass
     
@@ -258,7 +265,7 @@ async def get_ticket(
     db: Session = Depends(get_db)
 ):
     """Get ticket by ID"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -278,7 +285,7 @@ async def update_ticket(
     db: Session = Depends(get_db)
 ):
     """Update ticket"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -318,10 +325,10 @@ async def assign_ticket(
     db: Session = Depends(get_db)
 ):
     """Assign ticket to agent"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only operators and managers can assign tickets
-    if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
+    if user["role"] not in [UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
@@ -360,7 +367,7 @@ async def close_ticket(
     db: Session = Depends(get_db)
 ):
     """Close ticket with resolution"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -400,7 +407,7 @@ async def rate_ticket(
     db: Session = Depends(get_db)
 ):
     """Rate ticket satisfaction"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -431,7 +438,7 @@ async def get_ticket_messages(
     db: Session = Depends(get_db)
 ):
     """Get ticket messages"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -656,7 +663,7 @@ async def create_ticket_message(
     db: Session = Depends(get_db)
 ):
     """Add message to ticket"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -891,7 +898,7 @@ async def get_ai_suggestion(
     db: Session = Depends(get_db)
 ):
     """Get AI-generated response suggestion for a message"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -1027,10 +1034,10 @@ async def create_knowledge_article(
     db: Session = Depends(get_db)
 ):
     """Create knowledge base article"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only operators and managers can create articles
-    if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
+    if user["role"] not in [UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     article = KnowledgeBaseArticle(
@@ -1082,10 +1089,10 @@ async def get_dashboard_metrics(
     db: Session = Depends(get_db)
 ):
     """Get dashboard metrics"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only support agents, operators and managers can see dashboard
-    if user["role"] not in [UserRole.SUPPORT_AGENT, UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER, UserRole.FINANCIAL_MANAGER]:
+    if user["role"] not in [UserRole.SUPPORT_AGENT, UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Ticket metrics
@@ -1150,7 +1157,7 @@ async def get_agent_dashboard_metrics(
     db: Session = Depends(get_db)
 ):
     """Get dashboard metrics specifically for support agents"""
-    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only support agents can access this endpoint
     if user["role"] != UserRole.SUPPORT_AGENT:
