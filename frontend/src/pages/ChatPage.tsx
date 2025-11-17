@@ -76,10 +76,249 @@ export function ChatPage() {
     }
   }
 
-  const getBotResponse = async (userMessage: string): Promise<string> => {
-    const message = userMessage.toLowerCase()
+  const waitForAIResponse = async (ticketId: number, afterTimestamp: Date): Promise<string | null> => {
+    // Aguardar e verificar resposta da IA
+    for (let i = 0; i < 5; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      
+      try {
+        const { data: ticketMessages } = await api.get(`/support/tickets/${ticketId}/messages`)
+        
+        if (Array.isArray(ticketMessages)) {
+          const aiMessage = ticketMessages
+            .filter((msg: any) => 
+              msg.message_type === 'agent' && 
+              msg.author_name === 'Assistente Virtual' &&
+              new Date(msg.created_at) > afterTimestamp
+            )
+            .pop()
+          
+          if (aiMessage) {
+            return aiMessage.content
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao buscar resposta da IA:', error)
+      }
+    }
+    
+    return null
+  }
 
-    // Buscar na base de conhecimento
+  const checkChitChat = (message: string): string | null => {
+    // Normalizar: remover acentos e caracteres especiais, converter para minúsculas
+    let normalized = message.toLowerCase().trim()
+    // Remover pontuação mas manter espaços
+    normalized = normalized.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim()
+    
+    console.log('🔍 Verificando chit chat para:', message, '→ normalizado:', normalized)
+    
+    // Saudações - lista completa
+    const greetings = ['oi', 'olá', 'ola', 'oie', 'eai', 'hey', 'hi', 'hello', 'bom dia', 'boa tarde', 'boa noite', 'e aí', 'eai']
+    
+    // Verificar se a mensagem é APENAS uma saudação ou começa com saudação
+    for (const greeting of greetings) {
+      // Verificar se é exatamente a saudação
+      if (normalized === greeting) {
+        console.log('✅ Detectado saudação exata:', greeting)
+        const responses = [
+          'Olá! 👋 Bem-vindo ao atendimento do SADAE. Como posso ajudá-lo hoje?',
+          'Oi! 😊 Estou aqui para ajudar. Em que posso ser útil?',
+          'Olá! 👋 Fico feliz em ajudar. O que você precisa?',
+          'Oi! 😊 Como posso ajudar você hoje?'
+        ]
+        return responses[Math.floor(Math.random() * responses.length)]
+      }
+      // Verificar se começa com a saudação seguida de espaço ou fim
+      if (normalized.startsWith(greeting + ' ') || normalized === greeting) {
+        console.log('✅ Detectado saudação no início:', greeting)
+        const responses = [
+          'Olá! 👋 Bem-vindo ao atendimento do SADAE. Como posso ajudá-lo hoje?',
+          'Oi! 😊 Estou aqui para ajudar. Em que posso ser útil?',
+          'Olá! 👋 Fico feliz em ajudar. O que você precisa?',
+          'Oi! 😊 Como posso ajudar você hoje?'
+        ]
+        return responses[Math.floor(Math.random() * responses.length)]
+      }
+    }
+    
+    // Agradecimentos
+    const thanks = ['obrigado', 'obrigada', 'valeu', 'grato', 'grata', 'thanks', 'thank you']
+    if (thanks.some(t => normalized.includes(t))) {
+      const responses = [
+        'De nada! 😊 Fico feliz em ajudar. Precisa de mais alguma coisa?',
+        'Por nada! 😊 Estou sempre aqui para ajudar. Mais alguma dúvida?',
+        'Imagina! 😊 Fico feliz em poder ajudar. Precisa de mais informações?'
+      ]
+      return responses[Math.floor(Math.random() * responses.length)]
+    }
+    
+    // Despedidas
+    const goodbyes = ['tchau', 'até', 'até logo', 'até mais', 'bye', 'falou', 'flw']
+    if (goodbyes.some(g => normalized.includes(g))) {
+      const responses = [
+        'Tchau! 👋 Foi um prazer ajudar. Volte sempre que precisar!',
+        'Até logo! 😊 Qualquer dúvida, estou aqui!',
+        'Tchau! 👋 Tenha um ótimo dia!'
+      ]
+      return responses[Math.floor(Math.random() * responses.length)]
+    }
+    
+    // Status
+    const status = ['tudo bem', 'tudo bom', 'como vai', 'como está', 'beleza', 'tranquilo']
+    if (status.some(s => normalized.includes(s))) {
+      const responses = [
+        'Tudo ótimo! 😊 Pronto para ajudar você. E você, como está?',
+        'Estou bem, obrigado! 😊 Como posso ajudar você hoje?',
+        'Tudo certo! 😊 Em que posso ser útil?'
+      ]
+      return responses[Math.floor(Math.random() * responses.length)]
+    }
+    
+    return null
+  }
+
+  const checkCommonQuestions = (message: string): string | null => {
+    const normalized = message.toLowerCase()
+    
+    // Consulta de conta
+    if (normalized.includes('como consultar') || normalized.includes('ver conta') || 
+        normalized.includes('minha conta') || normalized.includes('consulta conta')) {
+      return `💳 **Consulta de Conta de Água**
+
+Para consultar sua conta, você pode:
+
+1. **Acessar o Dashboard**
+   - Vá em Dashboard > Faturamento
+   - Informe seu CPF/CNPJ e número de cliente
+
+2. **Visualizar Informações**
+   - Faturas abertas e pagas
+   - Histórico de consumo
+   - Detalhes de cada fatura
+
+3. **Baixar 2ª Via**
+   - Clique em "Baixar 2ª Via" na fatura desejada
+   - O documento será gerado em PDF
+
+Precisa de ajuda com algum passo específico?`
+    }
+    
+    // Segunda via
+    if (normalized.includes('segunda via') || normalized.includes('2ª via') || 
+        normalized.includes('baixar fatura') || normalized.includes('imprimir fatura')) {
+      return `📄 **2ª Via de Fatura**
+
+Para baixar a 2ª via da sua fatura:
+
+1. Acesse **Dashboard > Faturamento**
+2. Localize a fatura desejada
+3. Clique no botão **"Baixar 2ª Via"**
+4. O PDF será gerado automaticamente
+
+A 2ª via pode ser usada para:
+- Pagamento em bancos e lotéricas
+- Comprovação de pagamento
+- Declaração de imposto de renda
+
+Conseguiu baixar? Precisa de mais ajuda?`
+    }
+    
+    // Vazamento
+    if (normalized.includes('vazamento') || normalized.includes('vazando') || 
+        normalized.includes('água vazando') || normalized.includes('vazou')) {
+      return `🚨 **Reportar Vazamento**
+
+Se você identificou um vazamento, siga estes passos:
+
+1. **Ações Imediatas**
+   - Feche o registro principal da água
+   - Sinalize a área para evitar acidentes
+   - Evite contato com a água vazada
+
+2. **Reportar o Vazamento**
+   - Acesse **Serviços Públicos > Reportar Vazamento**
+   - Informe a localização exata
+   - Descreva a intensidade do vazamento
+   - Adicione fotos se possível
+
+3. **Urgência**
+   - Vazamentos grandes são tratados como emergência
+   - Nossa equipe será acionada imediatamente
+
+É um vazamento urgente? Posso criar um ticket de emergência agora!`
+    }
+    
+    // Religação
+    if (normalized.includes('religação') || normalized.includes('religar') || 
+        normalized.includes('religar água') || normalized.includes('ligar água')) {
+      return `🔧 **Solicitar Religação de Água**
+
+Para solicitar a religação, você precisa:
+
+1. **Regularizar Pendências**
+   - Quitar todas as faturas em atraso
+   - Pagar taxas de corte (se houver)
+   - Verificar se não há débitos pendentes
+
+2. **Documentos Necessários**
+   - Número do imóvel/cliente
+   - Comprovante de pagamento das pendências
+   - CPF/CNPJ do titular
+   - Endereço completo
+
+3. **Solicitar**
+   - Acesse **Atendimento > Novo Ticket**
+   - Categoria: "Solicitação"
+   - Assunto: "Religação de Água"
+
+Deseja que eu crie um ticket para sua solicitação agora?`
+    }
+    
+    // Tarifas
+    if (normalized.includes('tarifa') || normalized.includes('preço') || 
+        normalized.includes('valor') || normalized.includes('quanto custa')) {
+      return `💰 **Tarifas de Água e Esgoto**
+
+As tarifas variam conforme:
+
+1. **Faixa de Consumo**
+   - Até 10m³: Tarifa social
+   - 11-20m³: Tarifa residencial básica
+   - 21-30m³: Tarifa residencial média
+   - Acima de 30m³: Tarifa residencial alta
+
+2. **Categoria**
+   - Residencial
+   - Comercial
+   - Industrial
+   - Pública
+
+**Para consultar sua tarifa:**
+- Acesse **Serviços Públicos > Informações**
+- Use a calculadora de tarifas no app
+- Consulte sua última fatura
+
+Quer simular o valor da sua próxima fatura?`
+    }
+    
+    return null
+  }
+
+  const getBotResponse = async (userMessage: string): Promise<string | null> => {
+    // 1. Verificar Chit Chat primeiro
+    const chitChatResponse = checkChitChat(userMessage)
+    if (chitChatResponse) {
+      return chitChatResponse
+    }
+    
+    // 2. Verificar perguntas comuns
+    const commonQuestionResponse = checkCommonQuestions(userMessage)
+    if (commonQuestionResponse) {
+      return commonQuestionResponse
+    }
+
+    // 3. Fallback: buscar na base de conhecimento
     try {
       const { data: knowledgeBase } = await api.get('/support/knowledge-base', {
         params: { search: userMessage, limit: 3 }
@@ -93,7 +332,8 @@ export function ChatPage() {
       console.error('Erro ao buscar base de conhecimento:', error)
     }
 
-    // Respostas inteligentes
+    // 4. Respostas padrão como último fallback
+    const message = userMessage.toLowerCase()
     if (message.includes('conta') || message.includes('fatura') || message.includes('pagamento')) {
       return `💳 **Consulta de Conta**\n\nPara consultar sua conta:\n\n1. Acesse Dashboard > Faturamento\n2. Informe CPF/CNPJ e número de cliente\n3. Visualize faturas e histórico\n4. Baixe 2ª via\n\nPrecisa de ajuda específica?`
     }
@@ -108,10 +348,6 @@ export function ChatPage() {
 
     if (message.includes('tarifa') || message.includes('preço')) {
       return `💰 **Tarifas**\n\nAs tarifas variam por:\n• Faixa de consumo\n• Categoria (residencial/comercial)\n• Localização\n\nConsulte em Serviços Públicos > Informações.\n\nQuer mais detalhes?`
-    }
-
-    if (message.includes('sim') || message.includes('criar') || message.includes('ticket')) {
-      return `🎫 **Criar Ticket**\n\nPara criar, preciso:\n\n1. Assunto principal\n2. Descrição detalhada\n3. Localização (se aplicável)\n\nPode me fornecer essas informações?`
     }
 
     return `Entendi. Para ajudá-lo melhor:\n\n1. 📚 Buscar na base de conhecimento\n2. 🎫 Criar ticket para atendimento\n3. 👤 Conectar com atendente\n\nO que você prefere?`
@@ -156,38 +392,94 @@ export function ChatPage() {
     }
 
     setMessages(prev => [...prev, userMessage])
+    const messageToSend = inputMessage
     setInputMessage('')
     setIsTyping(true)
 
     try {
-      const botResponse = await getBotResponse(inputMessage)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      const botMessage: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        content: botResponse,
-        sender: 'bot',
-        timestamp: new Date(),
-        ticket_id: currentTicketId || undefined
+      // Verificar se é chit chat ou pergunta comum ANTES de criar ticket
+      const chitChatResponse = checkChitChat(messageToSend)
+      const commonQuestionResponse = checkCommonQuestions(messageToSend)
+      
+      // Se for chit chat ou pergunta comum, responder imediatamente sem criar ticket
+      if (chitChatResponse || commonQuestionResponse) {
+        const botMessage: ChatMessage = {
+          id: `bot-${Date.now()}`,
+          content: chitChatResponse || commonQuestionResponse || '',
+          sender: 'bot',
+          timestamp: new Date(),
+          author_name: 'Assistente Virtual'
+        }
+        setMessages(prev => [...prev, botMessage])
+        setIsTyping(false)
+        return
+      }
+      
+      // Se não temos ticket e não é chit chat, criar um ticket
+      let ticketId = currentTicketId
+      if (!ticketId) {
+        ticketId = await createTicketFromChat(messageToSend)
+        if (ticketId) {
+          setCurrentTicketId(ticketId)
+          const ticketMessage: ChatMessage = {
+            id: `ticket-${Date.now()}`,
+            content: `✅ **Ticket Criado!**\n\nNúmero: #${ticketId}\n\nAguarde enquanto processamos sua mensagem...`,
+            sender: 'bot',
+            timestamp: new Date(),
+            ticket_id: ticketId
+          }
+          setMessages(prev => [...prev, ticketMessage])
+          loadChatHistory()
+        }
       }
 
-      setMessages(prev => [...prev, botMessage])
-
-      if (inputMessage.toLowerCase().includes('criar') || inputMessage.toLowerCase().includes('ticket')) {
-        if (!currentTicketId) {
-          const ticketId = await createTicketFromChat(inputMessage)
-          if (ticketId) {
-            setCurrentTicketId(ticketId)
-            const ticketMessage: ChatMessage = {
-              id: `ticket-${Date.now()}`,
-              content: `✅ **Ticket Criado!**\n\nNúmero: #${ticketId}\n\nUm atendente entrará em contato em breve.\n\nVocê pode acompanhar na área de Suporte.`,
+      // Se temos ticket, enviar mensagem e aguardar resposta da IA
+      if (ticketId) {
+        // Enviar mensagem para o ticket (isso dispara a resposta automática da IA)
+        await api.post(`/support/tickets/${ticketId}/messages`, {
+          content: messageToSend
+        })
+        
+        // Aguardar resposta da IA
+        const aiResponse = await waitForAIResponse(ticketId, userMessage.timestamp)
+        
+        if (aiResponse) {
+          const botMessage: ChatMessage = {
+            id: `bot-${Date.now()}`,
+            content: aiResponse,
+            sender: 'bot',
+            timestamp: new Date(),
+            ticket_id: ticketId,
+            author_name: 'Assistente Virtual'
+          }
+          setMessages(prev => [...prev, botMessage])
+        } else {
+          // Fallback: usar chit chat e perguntas comuns primeiro
+          const fallbackResponse = await getBotResponse(messageToSend)
+          if (fallbackResponse) {
+            const botMessage: ChatMessage = {
+              id: `bot-${Date.now()}`,
+              content: fallbackResponse,
               sender: 'bot',
               timestamp: new Date(),
-              ticket_id: ticketId
+              ticket_id: ticketId,
+              author_name: 'Assistente Virtual'
             }
-            setMessages(prev => [...prev, ticketMessage])
-            loadChatHistory()
+            setMessages(prev => [...prev, botMessage])
           }
+        }
+      } else {
+        // Sem ticket: usar respostas diretas (chit chat já foi verificado acima)
+        const botResponse = await getBotResponse(messageToSend)
+        if (botResponse) {
+          const botMessage: ChatMessage = {
+            id: `bot-${Date.now()}`,
+            content: botResponse,
+            sender: 'bot',
+            timestamp: new Date(),
+            author_name: 'Assistente Virtual'
+          }
+          setMessages(prev => [...prev, botMessage])
         }
       }
     } catch (error) {
