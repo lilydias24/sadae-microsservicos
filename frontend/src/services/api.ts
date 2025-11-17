@@ -69,12 +69,17 @@ export const monitoringService = {
 
 export const maintenanceService = {
   getWorkOrders: (status?: string) => api.get("/maintenance/orders", { params: { status } }),
+  getWorkOrder: (id: number) => api.get(`/maintenance/orders/${id}`),
 
   createWorkOrder: (data: any) => api.post("/maintenance/orders", data),
 
   updateWorkOrder: (id: number, data: any) => api.put(`/maintenance/orders/${id}`, data),
 
   assignWorkOrder: (id: number, teamName: string) => api.put(`/maintenance/orders/${id}/assign`, null, { params: { team_name: teamName } }),
+
+  getOrderProgress: (id: number) => api.get(`/maintenance/orders/${id}/progress`),
+
+  addOrderProgress: (id: number, data: any) => api.post(`/maintenance/orders/${id}/progress`, data),
 
   getMaintenanceRecords: () => api.get("/maintenance/maintenances"),
 
@@ -87,6 +92,16 @@ export const maintenanceService = {
   getTeams: () => api.get("/maintenance/teams"),
 
   createTeam: (data: any) => api.post("/maintenance/teams", data),
+
+  updateTeam: (id: number, data: any) => api.put(`/maintenance/teams/${id}`, data),
+
+  getTeamMembers: (teamId: number) => api.get(`/maintenance/teams/${teamId}/members`),
+
+  addTeamMember: (teamId: number, data: any) => api.post(`/maintenance/teams/${teamId}/members`, data),
+
+  updateTeamMember: (teamId: number, memberId: number, data: any) => api.put(`/maintenance/teams/${teamId}/members/${memberId}`, data),
+
+  deleteTeamMember: (teamId: number, memberId: number) => api.delete(`/maintenance/teams/${teamId}/members/${memberId}`),
 
   generateReport: (params: any) => api.post("/maintenance/reports/interventions", params),
 }

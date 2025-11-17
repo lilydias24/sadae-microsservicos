@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
@@ -45,10 +46,14 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # broadened for local dev to avoid CORS blocks
-    allow_credentials=False,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 security = HTTPBearer()
@@ -167,6 +172,38 @@ async def register(request: Request):
             content=body,
             headers={"content-type": "application/json"}
         )
+        return response.json()
+
+@app.get("/auth/me")
+async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user information"""
+    token = credentials.credentials
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('auth')}/me",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+@app.put("/auth/me")
+async def update_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Update current user information"""
+    token = credentials.credentials
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('auth')}/me",
+            content=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "content-type": "application/json"
+            }
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
         return response.json()
 
 # Monitoring routes
@@ -687,6 +724,18 @@ async def report_leak(request: Request):
         )
         return response.json()
 
+@app.options("/support/{path:path}")
+async def support_options(path: str):
+    """Handle CORS preflight for support routes"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 # Support service routes
 @app.get("/support/health")
 async def support_health_check():
@@ -723,14 +772,16 @@ async def proxy_request(request: Request, service: str, path: str):
         headers["Authorization"] = request.headers.get("authorization")
     
     async with httpx.AsyncClient() as client:
-        response = await client.request(
+        upstream = await client.request(
             method=method,
             url=f"{service_registry.get_service_url(service)}{path}",
             content=body,
             headers=headers,
             params=dict(request.query_params)
         )
-        return response.json()
+        # Return raw response preserving status and content type to avoid JSON decode issues
+        media_type = upstream.headers.get("content-type", "application/json")
+        return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
 
 # Generic routes for any missing endpoints
 @app.api_route("/billing/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])

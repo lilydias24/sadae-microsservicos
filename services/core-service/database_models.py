@@ -245,6 +245,18 @@ class ServiceOrder(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class ServiceOrderProgress(Base):
+    __tablename__ = "service_order_progress"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    service_order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=False)
+    status = Column(String, nullable=False)
+    progress_notes = Column(Text, nullable=False)
+    estimated_completion = Column(DateTime, nullable=True)
+    created_by = Column(Integer, nullable=False)
+    created_by_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class Maintenance(Base):
     __tablename__ = "maintenances"
     
@@ -323,6 +335,18 @@ class Team(Base):
     equipment = Column(Text, nullable=True)  # JSON list of equipment
     performance_rating = Column(Float, nullable=True)
     completed_orders = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    role = Column(String(100), nullable=True)
+    contact = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
