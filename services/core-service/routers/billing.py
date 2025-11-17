@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
-from pydantic import Field
+from pydantic import BaseModel, Field
 import sys
 import os
 
@@ -1174,6 +1174,113 @@ async def test_debt_negotiation(
     db.commit()
     db.refresh(negotiation)
     return negotiation
+
+# ==================== REPORTS ====================
+
+class BillingReportFilters(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    status: Optional[str] = None
+    customer_id: Optional[int] = None
+
+@router.post("/reports/billing")
+async def generate_billing_report(
+    filters: BillingReportFilters,
+    req: Request,
+    db: Session = Depends(get_db)
+):
+    """Generate billing report"""
+    authorization = req.headers.get("Authorization")
+    user = await verify_user_token(authorization)
+    
+    # Check permissions
+    user_role = user.get("role", "")
+    if user_role not in ["financial_manager", "operator"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    # Validate period
+    if filters.start_date and filters.end_date:
+        period_days = (filters.end_date - filters.start_date).days
+        if period_days < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A data de início deve ser anterior à data de fim"
+            )
+    
+    # Query bills
+    query = db.query(Bill)
+    
+    if filters.start_date:
+        query = query.filter(Bill.billing_period_start >= filters.start_date)
+    if filters.end_date:
+        query = query.filter(Bill.billing_period_end <= filters.end_date)
+    if filters.status:
+        query = query.filter(Bill.status == filters.status)
+    if filters.customer_id:
+        query = query.filter(Bill.customer_id == filters.customer_id)
+    
+    bills = query.order_by(Bill.billing_period_start.desc()).all()
+    
+    # Calculate statistics
+    total_bills = len(bills)
+    total_amount = sum(float(bill.amount) for bill in bills)
+    total_consumption = sum(float(bill.consumption or 0) for bill in bills)
+    
+    # Status breakdown
+    status_breakdown = {}
+    for bill in bills:
+        status_key = bill.status or "unknown"
+        if status_key not in status_breakdown:
+            status_breakdown[status_key] = {"count": 0, "amount": 0}
+        status_breakdown[status_key]["count"] += 1
+        status_breakdown[status_key]["amount"] += float(bill.amount)
+    
+    # Calculate averages
+    avg_amount = total_amount / total_bills if total_bills > 0 else 0
+    avg_consumption = total_consumption / total_bills if total_bills > 0 else 0
+    
+    # Paid vs unpaid
+    paid_amount = sum(float(bill.amount) for bill in bills if bill.status == "paid")
+    unpaid_amount = total_amount - paid_amount
+    
+    report_id = generate_protocol_number()
+    
+    return {
+        "report_id": report_id,
+        "filters": filters.dict(),
+        "summary": {
+            "total_bills": total_bills,
+            "total_amount": round(total_amount, 2),
+            "total_consumption": round(total_consumption, 2),
+            "average_amount": round(avg_amount, 2),
+            "average_consumption": round(avg_consumption, 2),
+            "paid_amount": round(paid_amount, 2),
+            "unpaid_amount": round(unpaid_amount, 2),
+            "status_breakdown": status_breakdown,
+            "period": {
+                "start": filters.start_date.isoformat() if filters.start_date else None,
+                "end": filters.end_date.isoformat() if filters.end_date else None
+            }
+        },
+        "bills": [
+            {
+                "id": bill.id,
+                "customer_id": bill.customer_id,
+                "meter_id": bill.meter_id,
+                "amount": float(bill.amount),
+                "consumption": float(bill.consumption or 0),
+                "billing_period_start": bill.billing_period_start.isoformat(),
+                "billing_period_end": bill.billing_period_end.isoformat(),
+                "due_date": bill.due_date.isoformat() if bill.due_date else None,
+                "status": bill.status,
+                "paid_at": bill.paid_at.isoformat() if bill.paid_at else None,
+                "created_at": bill.created_at.isoformat()
+            }
+            for bill in bills[:1000]  # Limit to 1000 for performance
+        ],
+        "generated_at": datetime.now().isoformat(),
+        "generated_by": user.get("email", "Unknown")
+    }
 
 @router.post("/test-simple")
 async def test_simple(

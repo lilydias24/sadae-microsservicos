@@ -4,6 +4,8 @@ import React, { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import jsPDF from 'jspdf'
+import { formatDate } from '../utils/cn'
 import { 
   Download, 
   Calendar, 
@@ -14,7 +16,9 @@ import {
   MessageSquare,
   Loader2,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  X,
+  FileText
 } from 'lucide-react'
 
 interface ReportType {
@@ -38,6 +42,8 @@ export function ReportsPage() {
     customer_id: '',
     category: ''
   })
+  const [generatedReport, setGeneratedReport] = useState<any>(null)
+  const [showReportModal, setShowReportModal] = useState(false)
 
   const reportTypes: ReportType[] = [
     {
@@ -82,7 +88,8 @@ export function ReportsPage() {
       return data
     },
     onSuccess: (data) => {
-      alert(`Relatório gerado com sucesso! ID: ${data.report_id}`)
+      setGeneratedReport(data)
+      setShowReportModal(true)
     },
     onError: (error: any) => {
       alert(`Erro ao gerar relatório: ${error.response?.data?.detail || error.message}`)
@@ -96,7 +103,38 @@ export function ReportsPage() {
       return data
     },
     onSuccess: (data) => {
-      alert('Relatório de manutenção gerado com sucesso!')
+      setGeneratedReport(data)
+      setShowReportModal(true)
+    },
+    onError: (error: any) => {
+      alert(`Erro ao gerar relatório: ${error.response?.data?.detail || error.message}`)
+    }
+  })
+
+  // Mutation para gerar relatório de faturamento
+  const generateBillingReport = useMutation({
+    mutationFn: async (filters: any) => {
+      const { data } = await api.post('/billing/reports/billing', filters)
+      return data
+    },
+    onSuccess: (data) => {
+      setGeneratedReport(data)
+      setShowReportModal(true)
+    },
+    onError: (error: any) => {
+      alert(`Erro ao gerar relatório: ${error.response?.data?.detail || error.message}`)
+    }
+  })
+
+  // Mutation para gerar relatório de atendimento
+  const generateSupportReport = useMutation({
+    mutationFn: async (filters: any) => {
+      const { data } = await api.post('/support/reports/support', filters)
+      return data
+    },
+    onSuccess: (data) => {
+      setGeneratedReport(data)
+      setShowReportModal(true)
     },
     onError: (error: any) => {
       alert(`Erro ao gerar relatório: ${error.response?.data?.detail || error.message}`)
@@ -131,6 +169,10 @@ export function ReportsPage() {
         await generateMonitoringReport.mutateAsync(filters)
       } else if (selectedReportType === 'maintenance') {
         await generateMaintenanceReport.mutateAsync(filters)
+      } else if (selectedReportType === 'billing') {
+        await generateBillingReport.mutateAsync(filters)
+      } else if (selectedReportType === 'support') {
+        await generateSupportReport.mutateAsync(filters)
       } else {
         alert('Tipo de relatório ainda não implementado')
       }
@@ -148,6 +190,444 @@ export function ReportsPage() {
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0]
     }
+  }
+
+  const downloadReport = () => {
+    if (!generatedReport) return
+    
+    const dataStr = JSON.stringify(generatedReport, null, 2)
+    const dataBlob = new Blob([dataStr], { type: 'application/json' })
+    const url = URL.createObjectURL(dataBlob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `relatorio-${generatedReport.report_id || 'report'}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadReportPDF = () => {
+    if (!generatedReport) return
+
+    const doc = new jsPDF()
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 20
+    let yPosition = margin
+    const lineHeight = 7
+    const maxWidth = pageWidth - (margin * 2)
+
+    // Helper function to add new page if needed
+    const checkNewPage = (requiredSpace: number) => {
+      if (yPosition + requiredSpace > pageHeight - margin) {
+        doc.addPage()
+        yPosition = margin
+        return true
+      }
+      return false
+    }
+
+    // Helper function to add text with word wrap
+    const addText = (text: string, fontSize: number = 10, isBold: boolean = false, color: number[] = [0, 0, 0], xOffset: number = 0) => {
+      doc.setFontSize(fontSize)
+      doc.setTextColor(color[0], color[1], color[2])
+      if (isBold) {
+        doc.setFont(undefined, 'bold')
+      } else {
+        doc.setFont(undefined, 'normal')
+      }
+      
+      const lines = doc.splitTextToSize(text, maxWidth - xOffset)
+      lines.forEach((line: string) => {
+        checkNewPage(lineHeight)
+        doc.text(line, margin + xOffset, yPosition)
+        yPosition += lineHeight
+      })
+    }
+
+    // Helper to add section title
+    const addSectionTitle = (title: string) => {
+      yPosition += 5
+      checkNewPage(15)
+      doc.setFillColor(37, 99, 235)
+      doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 8, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(12)
+      doc.setFont(undefined, 'bold')
+      doc.text(title, margin + 5, yPosition + 4)
+      yPosition += 10
+      doc.setTextColor(0, 0, 0)
+    }
+
+    // Header with gradient effect
+    doc.setFillColor(37, 99, 235) // Blue
+    doc.rect(0, 0, pageWidth, 45, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(22)
+    doc.setFont(undefined, 'bold')
+    doc.text('SADAE', pageWidth / 2, 18, { align: 'center' })
+    doc.setFontSize(12)
+    doc.text('Sistema de Análise de Dados de Abastecimento e Esgoto', pageWidth / 2, 28, { align: 'center' })
+    doc.setFontSize(14)
+    doc.setFont(undefined, 'bold')
+    doc.text('RELATÓRIO GERADO', pageWidth / 2, 38, { align: 'center' })
+    
+    yPosition = 55
+    doc.setTextColor(0, 0, 0)
+
+    // Report ID and Info Box
+    doc.setDrawColor(37, 99, 235)
+    doc.setLineWidth(0.5)
+    doc.rect(margin, yPosition, pageWidth - (margin * 2), 20, 'S')
+    yPosition += 6
+    
+    doc.setFontSize(11)
+    doc.setFont(undefined, 'bold')
+    doc.setTextColor(37, 99, 235)
+    doc.text('ID do Relatório:', margin + 5, yPosition)
+    doc.setFont(undefined, 'normal')
+    doc.setTextColor(0, 0, 0)
+    doc.text(generatedReport.report_id || 'N/A', margin + 50, yPosition)
+    yPosition += 6
+
+    const generatedDate = generatedReport.generated_at 
+      ? new Date(generatedReport.generated_at).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      : new Date().toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+    
+    doc.setFont(undefined, 'bold')
+    doc.setTextColor(100, 100, 100)
+    doc.text('Gerado em:', margin + 5, yPosition)
+    doc.setFont(undefined, 'normal')
+    doc.setTextColor(0, 0, 0)
+    doc.text(generatedDate, margin + 50, yPosition)
+    yPosition += 6
+
+    if (generatedReport.generated_by) {
+      doc.setFont(undefined, 'bold')
+      doc.setTextColor(100, 100, 100)
+      doc.text('Gerado por:', margin + 5, yPosition)
+      doc.setFont(undefined, 'normal')
+      doc.setTextColor(0, 0, 0)
+      doc.text(generatedReport.generated_by, margin + 50, yPosition)
+    }
+    yPosition += 8
+
+    // Summary Section
+    if (generatedReport.summary) {
+      addSectionTitle('RESUMO')
+      
+      // Create summary cards layout
+      const summaryEntries = Object.entries(generatedReport.summary).filter(([key]) => key !== 'period')
+      
+      summaryEntries.forEach(([key, value]: [string, any], index: number) => {
+        // Translate labels to Portuguese
+        const labelMap: { [key: string]: string } = {
+          'total_readings': 'Total de Leituras',
+          'average_value': 'Valor Médio',
+          'min_value': 'Valor Mínimo',
+          'max_value': 'Valor Máximo',
+          'total_interventions': 'Total de Intervenções',
+          'total_cost': 'Custo Total',
+          'average_repair_time': 'Tempo Médio de Reparo',
+          'period': 'Período',
+          'team_statistics': 'Estatísticas por Equipe',
+          'total_bills': 'Total de Faturas',
+          'total_amount': 'Valor Total',
+          'total_consumption': 'Consumo Total',
+          'average_amount': 'Valor Médio',
+          'average_consumption': 'Consumo Médio',
+          'paid_amount': 'Valor Pago',
+          'unpaid_amount': 'Valor Não Pago',
+          'status_breakdown': 'Distribuição por Status',
+          'total_tickets': 'Total de Tickets',
+          'resolved_tickets': 'Tickets Resolvidos',
+          'open_tickets': 'Tickets Abertos',
+          'average_resolution_time_hours': 'Tempo Médio de Resolução (horas)',
+          'average_satisfaction_rating': 'Avaliação Média de Satisfação',
+          'category_breakdown': 'Distribuição por Categoria'
+        }
+        const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+        let displayValue = value
+        
+        if (typeof value === 'number') {
+          if (key.includes('value') || key.includes('average') || key.includes('min') || key.includes('max')) {
+            displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          } else {
+            displayValue = value.toLocaleString('pt-BR')
+          }
+        } else if (typeof value === 'object' && value !== null) {
+          displayValue = JSON.stringify(value)
+        }
+        
+        // Draw card background
+        const cardY = yPosition - 3
+        doc.setFillColor(240, 247, 255) // Light blue
+        doc.setDrawColor(200, 220, 255)
+        doc.rect(margin, cardY, pageWidth - (margin * 2), 12, 'FD')
+        
+        doc.setFontSize(9)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(37, 99, 235)
+        doc.text(label, margin + 5, yPosition + 3)
+        
+        doc.setFontSize(11)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(0, 0, 0)
+        doc.text(String(displayValue), pageWidth - margin - 5, yPosition + 3, { align: 'right' })
+        
+        yPosition += 14
+        checkNewPage(15)
+      })
+      
+      // Period display
+      if (generatedReport.summary.period) {
+        yPosition += 3
+        checkNewPage(20)
+        doc.setFillColor(248, 250, 252) // Light gray
+        doc.setDrawColor(200, 200, 200)
+        doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 18, 'FD')
+        
+        doc.setFontSize(10)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(37, 99, 235)
+        doc.text('Período de Análise', margin + 5, yPosition + 4)
+        
+        yPosition += 6
+        doc.setFontSize(9)
+        doc.setFont(undefined, 'normal')
+        doc.setTextColor(0, 0, 0)
+        
+        if (generatedReport.summary.period.start) {
+          const startDate = new Date(generatedReport.summary.period.start).toLocaleDateString('pt-BR', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric'
+          })
+          doc.text(`Início: ${startDate}`, margin + 5, yPosition + 3)
+        }
+        
+        if (generatedReport.summary.period.end) {
+          const endDate = new Date(generatedReport.summary.period.end).toLocaleDateString('pt-BR', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric'
+          })
+          doc.text(`Fim: ${endDate}`, margin + 5, yPosition + 9)
+        }
+        
+        yPosition += 12
+      }
+    }
+
+    // Filters Section
+    if (generatedReport.filters) {
+      addSectionTitle('FILTROS APLICADOS')
+      
+      const filters = Object.entries(generatedReport.filters).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== ''
+      )
+      
+      if (filters.length > 0) {
+        doc.setFillColor(248, 250, 252)
+        doc.setDrawColor(200, 200, 200)
+        const filterBoxHeight = filters.length * 8 + 4
+        doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), filterBoxHeight, 'FD')
+        
+        filters.forEach(([key, value]: [string, any], index: number) => {
+          // Translate filter labels to Portuguese
+          const filterLabelMap: { [key: string]: string } = {
+            'start_date': 'Data Inicial',
+            'end_date': 'Data Final',
+            'sensor_type': 'Tipo de Sensor',
+            'sensor_id': 'ID do Sensor',
+            'location': 'Localização',
+            'status': 'Status',
+            'team_name': 'Equipe',
+            'category': 'Categoria'
+          }
+          const label = filterLabelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+          let displayValue = value
+          
+          if (key.includes('date') || (typeof value === 'string' && value.includes('T'))) {
+            try {
+              displayValue = new Date(value).toLocaleDateString('pt-BR', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+            } catch (e) {
+              displayValue = String(value)
+            }
+          } else if (typeof value === 'object') {
+            displayValue = JSON.stringify(value)
+          }
+          
+          doc.setFontSize(9)
+          doc.setFont(undefined, 'bold')
+          doc.setTextColor(100, 100, 100)
+          doc.text(`${label}:`, margin + 5, yPosition + 3)
+          doc.setFont(undefined, 'normal')
+          doc.setTextColor(0, 0, 0)
+          doc.text(String(displayValue), margin + 60, yPosition + 3)
+          yPosition += 8
+        })
+        
+        yPosition += 3
+      }
+    }
+
+    // Data Section
+    const data = generatedReport.readings || generatedReport.interventions || generatedReport.bills || generatedReport.tickets || []
+    if (data.length > 0) {
+      addSectionTitle(`DADOS (${data.length} registros)`)
+
+      // Limit to first 30 records for PDF (to avoid huge files)
+      const recordsToShow = data.slice(0, 30)
+      
+      recordsToShow.forEach((record: any, index: number) => {
+        checkNewPage(25)
+        
+        // Record header
+        doc.setFillColor(240, 247, 255)
+        doc.setDrawColor(200, 220, 255)
+        doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 8, 'FD')
+        
+        doc.setFontSize(10)
+        doc.setFont(undefined, 'bold')
+        doc.setTextColor(37, 99, 235)
+        doc.text(`Registro ${index + 1}`, margin + 5, yPosition + 3)
+        yPosition += 10
+        
+        // Record fields (limit to 5 most important fields)
+        const entries = Object.entries(record).slice(0, 5)
+        entries.forEach(([key, value]: [string, any]) => {
+          // Translate field labels to Portuguese
+          const fieldLabelMap: { [key: string]: string } = {
+            'sensor_id': 'ID do Sensor',
+            'sensor_type': 'Tipo de Sensor',
+            'value': 'Valor',
+            'unit': 'Unidade',
+            'location': 'Localização',
+            'timestamp': 'Data/Hora',
+            'id': 'ID',
+            'service_order_id': 'ID da Ordem de Serviço',
+            'team_name': 'Equipe',
+            'completed_at': 'Concluído em',
+            'cost': 'Custo',
+            'description': 'Descrição',
+            'reading_id': 'ID da Leitura',
+            'operator_id': 'ID do Operador',
+            'operator_name': 'Nome do Operador',
+            'observation_type': 'Tipo de Observação',
+            'text': 'Texto',
+            'created_at': 'Criado em',
+            'updated_at': 'Atualizado em',
+            'status': 'Status',
+            'priority': 'Prioridade',
+            'assigned_team': 'Equipe Atribuída',
+            'repair_time': 'Tempo de Reparo',
+            'material_cost': 'Custo de Material',
+            'labor_cost': 'Custo de Mão de Obra',
+            'customer_id': 'ID do Cliente',
+            'meter_id': 'ID do Medidor',
+            'amount': 'Valor',
+            'consumption': 'Consumo',
+            'billing_period_start': 'Início do Período',
+            'billing_period_end': 'Fim do Período',
+            'due_date': 'Data de Vencimento',
+            'paid_at': 'Pago em',
+            'ticket_number': 'Número do Ticket',
+            'title': 'Título',
+            'category': 'Categoria',
+            'resolved_at': 'Resolvido em',
+            'satisfaction_rating': 'Avaliação de Satisfação',
+            'assigned_agent_id': 'ID do Agente Atribuído'
+          }
+          const label = fieldLabelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+          let displayValue = value
+          
+          if (key.includes('date') || key.includes('timestamp') || key.includes('at') || 
+              (typeof value === 'string' && value.includes('T'))) {
+            try {
+              displayValue = new Date(value).toLocaleString('pt-BR')
+            } catch (e) {
+              displayValue = String(value)
+            }
+          } else if (typeof value === 'number') {
+            displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          } else if (typeof value === 'object' && value !== null) {
+            displayValue = JSON.stringify(value)
+          }
+          
+          doc.setFontSize(8)
+          doc.setFont(undefined, 'bold')
+          doc.setTextColor(100, 100, 100)
+          doc.text(`${label}:`, margin + 10, yPosition)
+          doc.setFont(undefined, 'normal')
+          doc.setTextColor(0, 0, 0)
+          const valueText = String(displayValue).substring(0, 60) // Limit length
+          doc.text(valueText, margin + 50, yPosition)
+          yPosition += 6
+        })
+        
+        if (Object.keys(record).length > 5) {
+          doc.setFontSize(7)
+          doc.setTextColor(128, 128, 128)
+          doc.text(`+ ${Object.keys(record).length - 5} campo(s) adicional(is)`, margin + 10, yPosition)
+          yPosition += 5
+        }
+        
+        yPosition += 3
+      })
+
+      if (data.length > 30) {
+        yPosition += 3
+        checkNewPage(10)
+        doc.setFontSize(9)
+        doc.setTextColor(128, 128, 128)
+        doc.setFont(undefined, 'italic')
+        addText(`Nota: Exibindo apenas os primeiros 30 de ${data.length} registro(s). Consulte o arquivo JSON para todos os dados completos.`, 9, false, [128, 128, 128])
+      }
+    }
+
+    // Footer on all pages
+    const totalPages = (doc as any).internal.getNumberOfPages()
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i)
+      
+      // Footer line
+      doc.setDrawColor(200, 200, 200)
+      doc.setLineWidth(0.5)
+      doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15)
+      
+      doc.setFontSize(8)
+      doc.setTextColor(128, 128, 128)
+      doc.setFont(undefined, 'normal')
+      doc.text(
+        `Página ${i} de ${totalPages} | SADAE - Sistema de Análise de Dados`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      )
+    }
+
+    // Save PDF
+    doc.save(`relatorio-${generatedReport.report_id || 'report'}.pdf`)
   }
 
   React.useEffect(() => {
@@ -429,12 +909,17 @@ export function ReportsPage() {
                 disabled={
                   generateMonitoringReport.isPending || 
                   generateMaintenanceReport.isPending ||
+                  generateBillingReport.isPending ||
+                  generateSupportReport.isPending ||
                   !reportFilters.start_date ||
                   !reportFilters.end_date
                 }
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
               >
-                {(generateMonitoringReport.isPending || generateMaintenanceReport.isPending) ? (
+                {(generateMonitoringReport.isPending || 
+                  generateMaintenanceReport.isPending ||
+                  generateBillingReport.isPending ||
+                  generateSupportReport.isPending) ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     <span>Gerando...</span>
@@ -465,8 +950,315 @@ export function ReportsPage() {
                 <li>Defina o período de análise (data inicial e final)</li>
                 <li>Ajuste os filtros específicos para cada tipo de relatório</li>
                 <li>Clique em "Gerar Relatório" para criar o documento</li>
-                <li>Os relatórios podem ser exportados em PDF ou CSV</li>
+                <li>O relatório será exibido em um modal com resumo e dados completos</li>
+                <li>Você pode baixar o relatório em formato PDF ou JSON</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Modal */}
+      {showReportModal && generatedReport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b">
+              <div className="flex items-center space-x-3">
+                <FileText className="w-6 h-6 text-blue-600" />
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Relatório Gerado</h2>
+                  <p className="text-sm text-gray-600">ID: {generatedReport.report_id}</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={downloadReportPDF}
+                  className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Baixar PDF</span>
+                </button>
+                <button
+                  onClick={downloadReport}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Baixar JSON</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowReportModal(false)
+                    setGeneratedReport(null)
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-600 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {/* Summary */}
+              {generatedReport.summary && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Resumo</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {Object.entries(generatedReport.summary).map(([key, value]: [string, any]) => {
+                      // Skip period object, it will be shown separately
+                      if (key === 'period' && typeof value === 'object') return null
+                      
+                      // Translate labels to Portuguese
+                      const labelMap: { [key: string]: string } = {
+                        'total_readings': 'Total de Leituras',
+                        'average_value': 'Valor Médio',
+                        'min_value': 'Valor Mínimo',
+                        'max_value': 'Valor Máximo',
+                        'total_interventions': 'Total de Intervenções',
+                        'total_cost': 'Custo Total',
+                        'average_repair_time': 'Tempo Médio de Reparo',
+                        'period': 'Período',
+                        'team_statistics': 'Estatísticas por Equipe'
+                      }
+                      const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                      
+                      let displayValue = value
+                      
+                      // Format numbers
+                      if (typeof value === 'number') {
+                        if (key.includes('value') || key.includes('average') || key.includes('min') || key.includes('max')) {
+                          displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        } else {
+                          displayValue = value.toLocaleString('pt-BR')
+                        }
+                      }
+                      
+                      return (
+                        <div key={key} className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
+                          <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1">{label}</p>
+                          <p className="text-2xl font-bold text-blue-900">
+                            {displayValue}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  
+                  {/* Period display */}
+                  {generatedReport.summary.period && (
+                    <div className="mt-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <p className="text-sm font-medium text-gray-700 mb-2">Período de Análise</p>
+                      <div className="flex items-center space-x-4 text-sm text-gray-600">
+                        <div className="flex items-center space-x-2">
+                          <Calendar className="w-4 h-4" />
+                          <span>
+                            <strong>Início:</strong> {
+                              generatedReport.summary.period.start 
+                                ? new Date(generatedReport.summary.period.start).toLocaleDateString('pt-BR', {
+                                    day: '2-digit',
+                                    month: 'long',
+                                    year: 'numeric'
+                                  })
+                                : 'N/A'
+                            }
+                          </span>
+                        </div>
+                        <span className="text-gray-400">→</span>
+                        <div className="flex items-center space-x-2">
+                          <Calendar className="w-4 h-4" />
+                          <span>
+                            <strong>Fim:</strong> {
+                              generatedReport.summary.period.end 
+                                ? new Date(generatedReport.summary.period.end).toLocaleDateString('pt-BR', {
+                                    day: '2-digit',
+                                    month: 'long',
+                                    year: 'numeric'
+                                  })
+                                : 'N/A'
+                            }
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Filters */}
+              {generatedReport.filters && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Filtros Aplicados</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {Object.entries(generatedReport.filters).map(([key, value]: [string, any]) => {
+                        if (value === null || value === undefined || value === '') return null
+                        
+                        // Translate filter labels to Portuguese
+                        const filterLabelMap: { [key: string]: string } = {
+                          'start_date': 'Data Inicial',
+                          'end_date': 'Data Final',
+                          'sensor_type': 'Tipo de Sensor',
+                          'sensor_id': 'ID do Sensor',
+                          'location': 'Localização',
+                          'status': 'Status',
+                          'team_name': 'Equipe',
+                          'category': 'Categoria',
+                          'customer_id': 'ID do Cliente'
+                        }
+                        const label = filterLabelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                        let displayValue = value
+                        
+                        // Format dates
+                        if (key.includes('date') || (typeof value === 'string' && value.includes('T'))) {
+                          try {
+                            displayValue = new Date(value).toLocaleDateString('pt-BR', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })
+                          } catch (e) {
+                            displayValue = String(value)
+                          }
+                        } else if (typeof value === 'object') {
+                          displayValue = JSON.stringify(value)
+                        }
+                        
+                        return (
+                          <div key={key} className="flex items-start space-x-2 py-2 border-b border-gray-200 last:border-0">
+                            <span className="text-sm font-medium text-gray-700 min-w-[120px]">{label}:</span>
+                            <span className="text-sm text-gray-900 flex-1">{String(displayValue)}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Data Preview */}
+              {(generatedReport.readings || generatedReport.interventions || generatedReport.bills || generatedReport.tickets) && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Dados ({generatedReport.readings?.length || generatedReport.interventions?.length || generatedReport.bills?.length || generatedReport.tickets?.length || 0} registros)
+                  </h3>
+                  <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto border border-gray-200">
+                    <div className="space-y-3">
+                      {(generatedReport.readings || generatedReport.interventions || generatedReport.bills || generatedReport.tickets).slice(0, 20).map((item: any, index: number) => (
+                        <div key={index} className="bg-white p-3 rounded border border-gray-200 hover:shadow-sm transition">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                            {Object.entries(item).slice(0, 6).map(([key, value]: [string, any]) => {
+                              // Translate field labels to Portuguese
+                              const fieldLabelMap: { [key: string]: string } = {
+                                'sensor_id': 'ID do Sensor',
+                                'sensor_type': 'Tipo de Sensor',
+                                'value': 'Valor',
+                                'unit': 'Unidade',
+                                'location': 'Localização',
+                                'timestamp': 'Data/Hora',
+                                'id': 'ID',
+                                'service_order_id': 'ID da Ordem de Serviço',
+                                'team_name': 'Equipe',
+                                'completed_at': 'Concluído em',
+                                'cost': 'Custo',
+                                'description': 'Descrição',
+                                'reading_id': 'ID da Leitura',
+                                'operator_id': 'ID do Operador',
+                                'operator_name': 'Nome do Operador',
+                                'observation_type': 'Tipo de Observação',
+                                'text': 'Texto',
+                                'created_at': 'Criado em',
+                                'updated_at': 'Atualizado em',
+                                'status': 'Status',
+                                'priority': 'Prioridade',
+                                'assigned_team': 'Equipe Atribuída',
+                                'repair_time': 'Tempo de Reparo',
+                                'material_cost': 'Custo de Material',
+                                'labor_cost': 'Custo de Mão de Obra',
+                                'customer_id': 'ID do Cliente',
+                                'meter_id': 'ID do Medidor',
+                                'amount': 'Valor',
+                                'consumption': 'Consumo',
+                                'billing_period_start': 'Início do Período',
+                                'billing_period_end': 'Fim do Período',
+                                'due_date': 'Data de Vencimento',
+                                'paid_at': 'Pago em',
+                                'ticket_number': 'Número do Ticket',
+                                'title': 'Título',
+                                'category': 'Categoria',
+                                'resolved_at': 'Resolvido em',
+                                'satisfaction_rating': 'Avaliação de Satisfação',
+                                'assigned_agent_id': 'ID do Agente Atribuído'
+                              }
+                              const label = fieldLabelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                              let displayValue = value
+                              
+                              // Format dates
+                              if (key.includes('date') || key.includes('timestamp') || key.includes('at') || 
+                                  (typeof value === 'string' && value.includes('T'))) {
+                                try {
+                                  displayValue = new Date(value).toLocaleString('pt-BR')
+                                } catch (e) {
+                                  displayValue = String(value)
+                                }
+                              } else if (typeof value === 'number') {
+                                displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                              }
+                              
+                              return (
+                                <div key={key} className="flex items-start">
+                                  <span className="font-medium text-gray-600 min-w-[100px]">{label}:</span>
+                                  <span className="text-gray-900 break-words">{String(displayValue)}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                          {Object.keys(item).length > 6 && (
+                            <p className="text-xs text-gray-500 mt-2 italic">
+                              + {Object.keys(item).length - 6} campos adicionais
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                      {(generatedReport.readings?.length || generatedReport.interventions?.length || generatedReport.bills?.length || generatedReport.tickets?.length || 0) > 20 && (
+                        <div className="text-center py-4 text-sm text-gray-500 bg-blue-50 rounded border border-blue-200">
+                          <p className="font-medium">... e mais {(generatedReport.readings?.length || generatedReport.interventions?.length || generatedReport.bills?.length || generatedReport.tickets?.length || 0) - 20} registros</p>
+                          <p className="text-xs mt-1">Use o download JSON para ver todos os dados completos</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Metadata */}
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <span>
+                      <strong className="text-gray-700">Gerado em:</strong>{' '}
+                      {new Date(generatedReport.generated_at || Date.now()).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                  </div>
+                  {generatedReport.generated_by && (
+                    <div className="flex items-center space-x-2 text-gray-600">
+                      <span className="text-gray-400">•</span>
+                      <span>
+                        <strong className="text-gray-700">Gerado por:</strong> {generatedReport.generated_by}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
