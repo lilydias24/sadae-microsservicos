@@ -49,6 +49,7 @@ from schemas.support import (
     KnowledgeBaseFeedback, PublicTicketCreate, PublicTicketResponse,
     TicketStatus, TicketPriority, TicketCategory, MessageType
 )
+from business.ai_support import AISupportAssistant
 
 router = APIRouter()
 
@@ -369,10 +370,154 @@ async def get_ticket_messages(
     messages = query.order_by(TicketMessage.created_at).all()
     return messages
 
+async def generate_ai_response_async(
+    ticket_id: int,
+    user_message: str,
+    db: Session
+):
+    """Generate and save AI response asynchronously"""
+    try:
+        # Get fresh database session
+        from database import SessionLocal
+        db_session = SessionLocal()
+        
+        try:
+            ticket = db_session.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+            if not ticket:
+                return
+            
+            # Get knowledge base articles
+            kb_articles = db_session.query(KnowledgeBaseArticle).filter(
+                KnowledgeBaseArticle.is_published == True
+            ).all()
+            
+            # Convert to dict format for AI assistant
+            kb_data = []
+            for article in kb_articles:
+                kb_data.append({
+                    'id': article.id,
+                    'title': article.title,
+                    'content': article.content,
+                    'category': article.category,
+                    'tags': article.tags.split(',') if article.tags else [],
+                    'keywords': article.keywords.split(',') if article.keywords else [],
+                    'is_published': article.is_published,
+                    'is_featured': article.is_featured
+                })
+            
+            # Get conversation history
+            messages = db_session.query(TicketMessage).filter(
+                TicketMessage.ticket_id == ticket_id
+            ).order_by(TicketMessage.created_at).all()
+            
+            conversation_history = []
+            for msg in messages:
+                conversation_history.append({
+                    'message_type': msg.message_type,
+                    'content': msg.content,
+                    'author_name': msg.author_name,
+                    'created_at': msg.created_at.isoformat()
+                })
+            
+            # Prepare ticket context
+            ticket_context = {
+                'id': ticket.id,
+                'title': ticket.title,
+                'description': ticket.description,
+                'category': ticket.category,
+                'priority': ticket.priority,
+                'status': ticket.status
+            }
+            
+            # Initialize AI assistant
+            ai_assistant = AISupportAssistant()
+            
+            # Generate AI response
+            ai_response = ai_assistant.generate_response(
+                user_message=user_message,
+                ticket_context=ticket_context,
+                knowledge_base=kb_data,
+                conversation_history=conversation_history
+            )
+            
+            # Log para debug
+            confidence = ai_response.get('confidence', 0)
+            should_escalate = ai_assistant.should_escalate_to_agent(
+                user_message,
+                confidence,
+                conversation_history
+            )
+            
+            print(f"🤖 IA Response - Ticket {ticket_id}: confidence={confidence:.2f}, should_escalate={should_escalate}, has_response={bool(ai_response.get('response'))}")
+            
+            # Only send AI response if confidence is high enough and should not escalate
+            # Reduzido threshold para 0.3 para ser mais permissivo
+            if (ai_response.get('response') and 
+                confidence >= 0.3 and
+                not should_escalate):
+                
+                # Create AI response message
+                ai_message = TicketMessage(
+                    ticket_id=ticket_id,
+                    message_type=MessageType.AGENT,
+                    content=ai_response.get('response'),
+                    author_user_id=None,  # System/AI
+                    author_name="Assistente Virtual",
+                    author_email=None,
+                    is_internal=False
+                )
+                
+                db_session.add(ai_message)
+                
+                # Update ticket status
+                if ticket.status == TicketStatus.OPEN:
+                    ticket.status = TicketStatus.IN_PROGRESS
+                
+                db_session.commit()
+                print(f"✅ IA Response sent for ticket {ticket_id}")
+            else:
+                # Low confidence or should escalate - still try to send a helpful response
+                if ai_response.get('response') and confidence >= 0.2:
+                    # Send response even with low confidence, but mark it
+                    ai_message = TicketMessage(
+                        ticket_id=ticket_id,
+                        message_type=MessageType.AGENT,
+                        content=f"{ai_response.get('response')}\n\n*Se precisar de mais ajuda, nossa equipe entrará em contato em breve.*",
+                        author_user_id=None,
+                        author_name="Assistente Virtual",
+                        author_email=None,
+                        is_internal=False
+                    )
+                    db_session.add(ai_message)
+                    db_session.commit()
+                    print(f"⚠️ IA Response sent with low confidence ({confidence:.2f}) for ticket {ticket_id}")
+                else:
+                    # Very low confidence - notify that agent will respond
+                    escalation_message = TicketMessage(
+                        ticket_id=ticket_id,
+                        message_type=MessageType.SYSTEM,
+                        content="Sua mensagem foi recebida. Nossa equipe de atendimento entrará em contato em breve.",
+                        author_user_id=None,
+                        author_name="Sistema",
+                        author_email=None,
+                        is_internal=False
+                    )
+                    db_session.add(escalation_message)
+                    db_session.commit()
+                    print(f"📞 Escalated to agent for ticket {ticket_id} (confidence too low: {confidence:.2f})")
+                
+        finally:
+            db_session.close()
+    except Exception as e:
+        print(f"Error generating AI response: {e}")
+        import traceback
+        traceback.print_exc()
+
 @router.post("/tickets/{ticket_id}/messages", response_model=MessageResponse)
 async def create_ticket_message(
     ticket_id: int,
     message_data: MessageCreate,
+    background_tasks: BackgroundTasks,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
@@ -416,7 +561,102 @@ async def create_ticket_message(
     db.commit()
     db.refresh(message)
     
+    # If message is from a client, trigger AI response in background
+    if message_type == MessageType.CLIENT and not message_data.is_internal:
+        background_tasks.add_task(
+            generate_ai_response_async,
+            ticket_id,
+            message_data.content,
+            db
+        )
+    
     return message
+
+# ==================== AI SUPPORT ====================
+
+@router.post("/tickets/{ticket_id}/ai-suggest")
+async def get_ai_suggestion(
+    ticket_id: int,
+    message_data: MessageCreate,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Get AI-generated response suggestion for a message"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado")
+    
+    # Check permissions
+    if user["role"] == UserRole.CITIZEN and ticket.client_id != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+    
+    # Get knowledge base articles
+    kb_articles = db.query(KnowledgeBaseArticle).filter(
+        KnowledgeBaseArticle.is_published == True
+    ).all()
+    
+    # Convert to dict format for AI assistant
+    kb_data = []
+    for article in kb_articles:
+        kb_data.append({
+            'id': article.id,
+            'title': article.title,
+            'content': article.content,
+            'category': article.category,
+            'tags': article.tags.split(',') if article.tags else [],
+            'keywords': article.keywords.split(',') if article.keywords else [],
+            'is_published': article.is_published,
+            'is_featured': article.is_featured
+        })
+    
+    # Get conversation history
+    messages = db.query(TicketMessage).filter(
+        TicketMessage.ticket_id == ticket_id
+    ).order_by(TicketMessage.created_at).all()
+    
+    conversation_history = []
+    for msg in messages:
+        conversation_history.append({
+            'message_type': msg.message_type,
+            'content': msg.content,
+            'author_name': msg.author_name,
+            'created_at': msg.created_at.isoformat()
+        })
+    
+    # Prepare ticket context
+    ticket_context = {
+        'id': ticket.id,
+        'title': ticket.title,
+        'description': ticket.description,
+        'category': ticket.category,
+        'priority': ticket.priority,
+        'status': ticket.status
+    }
+    
+    # Initialize AI assistant
+    ai_assistant = AISupportAssistant()
+    
+    # Generate AI response
+    ai_response = ai_assistant.generate_response(
+        user_message=message_data.content,
+        ticket_context=ticket_context,
+        knowledge_base=kb_data,
+        conversation_history=conversation_history
+    )
+    
+    return {
+        'suggestion': ai_response.get('response'),
+        'confidence': ai_response.get('confidence', 0.0),
+        'relevant_articles': ai_response.get('relevant_articles', []),
+        'suggestions': ai_response.get('suggestions', []),
+        'should_escalate': ai_assistant.should_escalate_to_agent(
+            message_data.content,
+            ai_response.get('confidence', 0.0),
+            conversation_history
+        )
+    }
 
 # ==================== KNOWLEDGE BASE ====================
 
