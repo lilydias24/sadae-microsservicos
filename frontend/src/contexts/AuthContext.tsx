@@ -57,9 +57,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const storedUser = localStorage.getItem("user")
 
     if (storedToken && storedUser) {
-      setToken(storedToken)
-      setUser(JSON.parse(storedUser))
-      // Let the axios interceptor handle the Authorization header
+      try {
+        // Validar se storedUser não é "undefined" ou string vazia
+        if (storedUser && storedUser !== "undefined" && storedUser.trim() !== "") {
+          const parsedUser = JSON.parse(storedUser)
+          setToken(storedToken)
+          setUser(parsedUser)
+          // Let the axios interceptor handle the Authorization header
+        } else {
+          // Limpar valores inválidos
+          localStorage.removeItem("token")
+          localStorage.removeItem("user")
+        }
+      } catch (error) {
+        console.error("Erro ao parsear usuário do localStorage:", error)
+        // Limpar valores corrompidos
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+      }
     }
 
     setIsLoading(false)

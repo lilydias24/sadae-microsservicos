@@ -38,7 +38,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
 
   useEffect(() => {
     if (!token || !user) {
-      console.log("⏸️ WebSocket: aguardando autenticação...")
+      // Silenciar mensagem quando não há autenticação (usuário não logado)
       return
     }
 

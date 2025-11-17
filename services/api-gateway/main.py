@@ -174,6 +174,38 @@ async def register(request: Request):
         )
         return response.json()
 
+@app.get("/auth/me")
+async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user information"""
+    token = credentials.credentials
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{service_registry.get_service_url('auth')}/me",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
+@app.put("/auth/me")
+async def update_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Update current user information"""
+    token = credentials.credentials
+    body = await request.body()
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{service_registry.get_service_url('auth')}/me",
+            content=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "content-type": "application/json"
+            }
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+        return response.json()
+
 # Monitoring routes
 @app.get("/monitoring/sensors")
 async def get_sensors(current_user: dict = Depends(get_current_user)):
@@ -692,6 +724,18 @@ async def report_leak(request: Request):
         )
         return response.json()
 
+@app.options("/support/{path:path}")
+async def support_options(path: str):
+    """Handle CORS preflight for support routes"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 # Support service routes
 @app.get("/support/health")
 async def support_health_check():
