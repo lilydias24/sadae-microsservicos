@@ -763,3 +763,122 @@ async def create_service_order_from_complaint(complaint: Complaint):
         # Implementation would create service order automatically
     except Exception as e:
         print(f"Error creating service order from complaint: {e}")
+
+# ==================== REPORTS ====================
+
+@router.post("/reports/interventions", response_model=MaintenanceReportResponse)
+async def generate_interventions_report(
+    filters: ReportFilters,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Generate maintenance interventions report (RF018)"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    # Validate period
+    if filters.start_date and filters.end_date:
+        period_days = (filters.end_date - filters.start_date).days
+        if period_days < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A data de início deve ser anterior à data de fim"
+            )
+        # For periods > 6 months, should process in background (future enhancement)
+        if period_days > 180:
+            # Still process, but warn that it might take time
+            pass
+    
+    # Query maintenances (interventions)
+    query = db.query(Maintenance).join(ServiceOrder, Maintenance.service_order_id == ServiceOrder.id)
+    
+    if filters.start_date:
+        query = query.filter(Maintenance.completed_at >= filters.start_date)
+    if filters.end_date:
+        query = query.filter(Maintenance.completed_at <= filters.end_date)
+    if filters.team_name:
+        query = query.filter(ServiceOrder.assigned_team.ilike(f"%{filters.team_name}%"))
+    if filters.location:
+        query = query.filter(ServiceOrder.location.ilike(f"%{filters.location}%"))
+    if filters.service_type:
+        # Assuming service_type maps to some field in ServiceOrder
+        query = query.filter(ServiceOrder.description.ilike(f"%{filters.service_type}%"))
+    
+    maintenances = query.order_by(desc(Maintenance.completed_at)).all()
+    
+    # Calculate statistics
+    total_interventions = len(maintenances)
+    total_cost = sum(float(m.cost or 0) for m in maintenances)
+    avg_cost = total_cost / total_interventions if total_interventions > 0 else 0
+    
+    # Calculate average time (TMR - Time to Repair)
+    total_duration_hours = 0
+    for m in maintenances:
+        if m.service_order and m.completed_at and m.service_order.created_at:
+            duration = (m.completed_at - m.service_order.created_at).total_seconds() / 3600
+            total_duration_hours += duration
+    avg_duration_hours = total_duration_hours / total_interventions if total_interventions > 0 else 0
+    
+    # Team statistics
+    team_stats = {}
+    for m in maintenances:
+        if m.service_order and m.service_order.assigned_team:
+            team = m.service_order.assigned_team
+            if team not in team_stats:
+                team_stats[team] = {
+                    "total_interventions": 0,
+                    "total_cost": 0,
+                    "total_duration_hours": 0
+                }
+            team_stats[team]["total_interventions"] += 1
+            team_stats[team]["total_cost"] += float(m.cost or 0)
+            if m.service_order.created_at and m.completed_at:
+                duration = (m.completed_at - m.service_order.created_at).total_seconds() / 3600
+                team_stats[team]["total_duration_hours"] += duration
+    
+    # Calculate averages for each team
+    for team, stats in team_stats.items():
+        if stats["total_interventions"] > 0:
+            stats["avg_cost"] = stats["total_cost"] / stats["total_interventions"]
+            stats["avg_duration_hours"] = stats["total_duration_hours"] / stats["total_interventions"]
+    
+    report_id = generate_protocol_number()
+    
+    return {
+        "report_id": report_id,
+        "filters": filters.dict(),
+        "summary": {
+            "total_interventions": total_interventions,
+            "total_cost": round(total_cost, 2),
+            "average_cost": round(avg_cost, 2),
+            "average_duration_hours": round(avg_duration_hours, 2),
+            "period": {
+                "start": filters.start_date.isoformat() if filters.start_date else None,
+                "end": filters.end_date.isoformat() if filters.end_date else None
+            }
+        },
+        "team_statistics": team_stats,
+        "interventions": [
+            {
+                "id": m.id,
+                "service_order_id": m.service_order_id,
+                "service_order": {
+                    "id": m.service_order.id if m.service_order else None,
+                    "protocol_number": m.service_order.protocol_number if m.service_order else None,
+                    "title": m.service_order.title if m.service_order else None,
+                    "description": m.service_order.description if m.service_order else None,
+                    "location": m.service_order.location if m.service_order else None,
+                } if m.service_order else None,
+                "description": m.description,
+                "cost": float(m.cost or 0),
+                "duration_hours": m.duration_hours,
+                "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+                "team_name": m.service_order.assigned_team if m.service_order else None
+            }
+            for m in maintenances
+        ],
+        "generated_at": datetime.now(),
+        "generated_by": user.get("name", "Unknown")
+    }

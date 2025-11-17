@@ -202,6 +202,80 @@ async def create_anomaly(
     
     return anomaly
 
+# ==================== OBSERVATIONS ====================
+
+@router.post("/observations", response_model=ObservationResponse)
+async def create_observation(
+    observation_data: ObservationCreate,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Create observation for sensor data (RF004)"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    if user["role"] != UserRole.OPERATOR:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    # Validate text length (10-500 characters as per business rule)
+    text = observation_data.text or ""
+    if len(text) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A observação deve ter no mínimo 10 caracteres"
+        )
+    if len(text) > 500:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A observação deve ter no máximo 500 caracteres"
+        )
+    
+    # Get reading_id from observation_data if provided, otherwise None
+    reading_id = getattr(observation_data, 'reading_id', None)
+    
+    observation = Observation(
+        sensor_id=observation_data.sensor_id,
+        reading_id=reading_id,
+        text=text,
+        operator_id=user["id"],
+        operator_name=user.get("name", "Unknown"),
+        observation_type=observation_data.observation_type,
+        timestamp=observation_data.timestamp or datetime.now()
+    )
+    
+    db.add(observation)
+    db.commit()
+    db.refresh(observation)
+    
+    return observation
+
+@router.get("/observations", response_model=List[ObservationResponse])
+async def get_observations(
+    sensor_id: Optional[str] = None,
+    reading_id: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    skip: int = 0,
+    limit: int = 100,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Get observations with filters"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    query = db.query(Observation)
+    
+    if sensor_id:
+        query = query.filter(Observation.sensor_id == sensor_id)
+    if reading_id:
+        query = query.filter(Observation.reading_id == reading_id)
+    if start_date:
+        query = query.filter(Observation.timestamp >= start_date)
+    if end_date:
+        query = query.filter(Observation.timestamp <= end_date)
+    
+    observations = query.order_by(desc(Observation.timestamp)).offset(skip).limit(limit).all()
+    return observations
+
 @router.get("/anomalies", response_model=List[AnomalyResponse])
 async def get_anomalies(
     status: Optional[AnomalyStatus] = None,
@@ -315,4 +389,87 @@ async def get_monitoring_dashboard(
         "critical_anomalies": critical_anomalies,
         "recent_readings": recent_readings,
         "pending_leaks": pending_leaks
+    }
+
+# ==================== REPORTS ====================
+
+@router.post("/reports/generate")
+async def generate_sensor_report(
+    filters: ReportFilters,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Generate sensor data report (RF002)"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    if user["role"] not in [UserRole.OPERATOR, UserRole.CRISIS_MANAGER]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    # Validate period (max 90 days as per business rule)
+    if filters.start_date and filters.end_date:
+        period_days = (filters.end_date - filters.start_date).days
+        if period_days > 90:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O período máximo para geração de relatório é de 90 dias"
+            )
+        if period_days < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A data de início deve ser anterior à data de fim"
+            )
+    
+    query = db.query(SensorReading)
+    
+    if filters.sensor_type:
+        query = query.filter(SensorReading.sensor_type == filters.sensor_type)
+    if filters.sensor_id:
+        query = query.filter(SensorReading.sensor_id == filters.sensor_id)
+    if filters.start_date:
+        query = query.filter(SensorReading.timestamp >= filters.start_date)
+    if filters.end_date:
+        query = query.filter(SensorReading.timestamp <= filters.end_date)
+    if filters.location:
+        query = query.filter(SensorReading.location.ilike(f"%{filters.location}%"))
+    
+    readings = query.order_by(SensorReading.timestamp.desc()).all()
+    
+    # Generate report summary
+    total_readings = len(readings)
+    if total_readings > 0:
+        avg_value = sum(r.value for r in readings) / total_readings
+        min_value = min(r.value for r in readings)
+        max_value = max(r.value for r in readings)
+    else:
+        avg_value = min_value = max_value = 0
+    
+    report_id = generate_protocol_number()
+    
+    return {
+        "report_id": report_id,
+        "filters": filters.dict(),
+        "summary": {
+            "total_readings": total_readings,
+            "average_value": round(avg_value, 2),
+            "min_value": min_value,
+            "max_value": max_value,
+            "period": {
+                "start": filters.start_date.isoformat() if filters.start_date else None,
+                "end": filters.end_date.isoformat() if filters.end_date else None
+            }
+        },
+        "readings": [
+            {
+                "id": r.id,
+                "sensor_id": r.sensor_id,
+                "sensor_type": r.sensor_type,
+                "value": r.value,
+                "unit": r.unit,
+                "location": r.location,
+                "timestamp": r.timestamp.isoformat()
+            }
+            for r in readings[:1000]  # Limit to 1000 for performance
+        ],
+        "generated_at": datetime.now().isoformat(),
+        "generated_by": user.get("name", "Unknown")
     }
