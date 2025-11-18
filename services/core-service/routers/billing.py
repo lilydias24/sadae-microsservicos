@@ -488,7 +488,7 @@ async def get_meter_readings(
 async def get_bills(
     request: Request,
     customer_id: Optional[int] = Field(None, description="ID do cliente para filtrar faturas", example=5),
-    status: Optional[BillStatus] = Field(None, description="Status da fatura: pending, paid, overdue, contested", example="pending"),
+    status: Optional[str] = Field(None, description="Status da fatura: pending, paid, overdue, contested", example="pending"),
     skip: int = Field(0, description="Número de registros para pular", ge=0, example=0),
     limit: int = Field(100, description="Número máximo de registros", ge=1, le=1000, example=100),
     db: Session = Depends(get_db)

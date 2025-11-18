@@ -1379,9 +1379,20 @@ async def generate_support_report(
     from shared.utils import generate_protocol_number
     report_id = generate_protocol_number()
     
+    # Convert filters to dict safely
+    try:
+        filters_dict = filters.dict() if hasattr(filters, 'dict') else dict(filters)
+    except:
+        filters_dict = {
+            "start_date": filters.start_date.isoformat() if filters.start_date else None,
+            "end_date": filters.end_date.isoformat() if filters.end_date else None,
+            "status": filters.status,
+            "category": filters.category
+        }
+    
     return {
         "report_id": report_id,
-        "filters": filters.dict(),
+        "filters": filters_dict,
         "summary": {
             "total_tickets": total_tickets,
             "resolved_tickets": len(resolved_tickets),
