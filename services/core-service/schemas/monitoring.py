@@ -164,12 +164,13 @@ class AnomalyResponse(AnomalyBase):
 
 class ObservationBase(BaseModel):
     sensor_id: str = Field(..., min_length=1, max_length=50)
-    text: str = Field(..., min_length=5, max_length=2000)
-    timestamp: datetime
+    text: str = Field(..., min_length=10, max_length=500)  # Updated to match business rule (10-500 chars)
+    timestamp: Optional[datetime] = None
+    reading_id: Optional[int] = None  # Optional reading ID to link observation to specific reading
 
 class ObservationCreate(ObservationBase):
-    observation_type: Optional[str] = Field(None, max_length=50)  # "maintenance", "inspection", "issue"
-    severity: Optional[AlertLevel] = AlertLevel.LOW
+    observation_type: Optional[str] = Field(None, max_length=50)  # "maintenance", "inspection", "issue", "general"
+    severity: Optional[AlertLevel] = None
     photos: Optional[List[str]] = None
     action_required: bool = False
 
@@ -182,6 +183,7 @@ class ObservationUpdate(BaseModel):
 
 class ObservationResponse(ObservationBase):
     id: int
+    reading_id: Optional[int] = None
     operator_id: int
     operator_name: Optional[str] = None
     observation_type: Optional[str] = None
