@@ -1,7 +1,7 @@
 """
 Pydantic schemas for Support Service
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -72,23 +72,22 @@ class TicketResponse(BaseModel):
     category: TicketCategory
     priority: TicketPriority
     status: TicketStatus
-    client_user_id: int
+    client_id: int  # Changed from client_user_id to match database model
     client_name: str
     client_email: str
-    client_phone: Optional[str]
-    assigned_agent_id: Optional[int]
-    assigned_agent_name: Optional[str]
+    client_phone: Optional[str] = None
+    assigned_agent_id: Optional[int] = None
+    assigned_agent_name: Optional[str] = None
     created_at: datetime
-    updated_at: Optional[datetime]
-    resolved_at: Optional[datetime]
-    closed_at: Optional[datetime]
-    satisfaction_rating: Optional[int]
-    satisfaction_comment: Optional[str]
-    related_bill_id: Optional[int]
-    related_order_id: Optional[int]
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    satisfaction_rating: Optional[int] = None
+    satisfaction_comment: Optional[str] = None
+    related_bill_id: Optional[int] = None
+    related_order_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Message schemas
 class MessageBase(BaseModel):

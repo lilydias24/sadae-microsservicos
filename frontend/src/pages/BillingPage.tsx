@@ -1,7 +1,6 @@
-"use client"
-
 import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import { useAuth } from "../contexts/AuthContext"
 import { 
@@ -21,7 +20,8 @@ import dataService, { type Bill, type BillDispute, type DebtNegotiation } from "
 
 export function BillingPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<"bills" | "disputes" | "negotiations">("bills")
+  const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<"bills" | "disputes" | "negotiations" | "chat">("bills")
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
   const [selectedDispute, setSelectedDispute] = useState<BillDispute | null>(null)
   const [selectedNegotiation, setSelectedNegotiation] = useState<DebtNegotiation | null>(null)
@@ -520,10 +520,17 @@ export function BillingPage() {
               { id: "bills", name: "Faturas", icon: "📄", count: statistics.total },
               { id: "disputes", name: "Contestações", icon: "⚖️", count: disputes?.length || 0 },
               { id: "negotiations", name: "Negociações", icon: "🤝", count: negotiations?.length || 0 },
+              { id: "chat", name: "Chat de Faturamento", icon: "💬", count: null },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  if (tab.id === "chat") {
+                    navigate("/billing-chat")
+                  } else {
+                    setActiveTab(tab.id as any)
+                  }
+                }}
                 className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === tab.id
                     ? "border-blue-500 text-blue-600"
@@ -532,7 +539,9 @@ export function BillingPage() {
               >
                 <span>{tab.icon}</span>
                 <span>{tab.name}</span>
-                <Badge variant="default" className="ml-1">{tab.count}</Badge>
+                {tab.count !== null && (
+                  <Badge variant="default" className="ml-1">{tab.count}</Badge>
+                )}
               </button>
             ))}
           </nav>

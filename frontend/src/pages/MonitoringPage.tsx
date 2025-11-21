@@ -4,6 +4,10 @@ import { useEffect, useState } from "react"
 import { monitoringDev } from "../services/monitoringService"
 import { useWebSocket } from "../contexts/WebSocketContext"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import { api } from "../services/api"
+import { useAuth } from "../contexts/AuthContext"
+import { Modal } from "../components/ui"
+import { MessageSquare } from "lucide-react"
 
 // --- INTERFACES (mantidas para estrutura) ---
 interface SensorReading {
@@ -49,6 +53,7 @@ const mockRealtimeChartData = Array.from({ length: 50 }, (_, i) => ({
 
 
 export function MonitoringPage() {
+  const { user } = useAuth()
   const [selectedSensorType, setSelectedSensorType] = useState<string>("all")
   const { sensorData, alerts, isConnected, lastMessage } = useWebSocket()
 
@@ -57,6 +62,14 @@ export function MonitoringPage() {
   const [anomalies, setAnomalies] = useState<{ data: Anomaly[] }>({ data: [] })
   const [anomaliesLimit, setAnomaliesLimit] = useState<number>(20)
   const [isUpdating, setIsUpdating] = useState<number | null>(null)
+  
+  // Estados para observações (RF004)
+  const [showObservationModal, setShowObservationModal] = useState(false)
+  const [selectedReading, setSelectedReading] = useState<{ sensor_id: string; reading_id?: number; timestamp: string } | null>(null)
+  const [observationText, setObservationText] = useState("")
+  const [observationType, setObservationType] = useState<string>("general")
+  const [isSubmittingObservation, setIsSubmittingObservation] = useState(false)
+  const [observations, setObservations] = useState<any[]>([])
 
   // Carregar dados iniciais (apenas uma vez)
   useEffect(() => {
@@ -130,6 +143,54 @@ export function MonitoringPage() {
       // noop
     } finally {
       setIsUpdating(null)
+    }
+  }
+
+  // Função para abrir modal de observação (RF004)
+  const handleOpenObservationModal = (sensorId: string, readingId?: number, timestamp?: string) => {
+    setSelectedReading({ sensor_id: sensorId, reading_id: readingId, timestamp: timestamp || new Date().toISOString() })
+    setShowObservationModal(true)
+    setObservationText("")
+  }
+
+  // Função para submeter observação (RF004)
+  const handleSubmitObservation = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!selectedReading) return
+    
+    // Validação: 10-500 caracteres
+    if (observationText.length < 10) {
+      alert("A observação deve ter no mínimo 10 caracteres")
+      return
+    }
+    if (observationText.length > 500) {
+      alert("A observação deve ter no máximo 500 caracteres")
+      return
+    }
+
+    try {
+      setIsSubmittingObservation(true)
+      await api.post("/monitoring/observations", {
+        sensor_id: selectedReading.sensor_id,
+        reading_id: selectedReading.reading_id,
+        text: observationText,
+        observation_type: observationType,
+        timestamp: selectedReading.timestamp
+      })
+      
+      alert("Observação registrada com sucesso!")
+      setShowObservationModal(false)
+      setObservationText("")
+      setSelectedReading(null)
+      
+      // Recarregar observações se necessário
+      // loadObservations()
+    } catch (error: any) {
+      console.error("Erro ao registrar observação:", error)
+      alert(`Erro ao registrar observação: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      setIsSubmittingObservation(false)
     }
   }
   
@@ -343,7 +404,18 @@ export function MonitoringPage() {
 
       {/* Real-time Chart */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Dados em Tempo Real (Sensor de Pressão P-101)</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Dados em Tempo Real (Sensor de Pressão P-101)</h3>
+          {user?.role === "operator" && (
+            <button
+              onClick={() => handleOpenObservationModal("PRESS_001", undefined, new Date().toISOString())}
+              className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Registrar Observação</span>
+            </button>
+          )}
+        </div>
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={realtimeData}>
@@ -429,6 +501,92 @@ export function MonitoringPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Observação (RF004) */}
+      {showObservationModal && (
+        <Modal
+          isOpen={showObservationModal}
+          onClose={() => {
+            setShowObservationModal(false)
+            setObservationText("")
+            setSelectedReading(null)
+          }}
+          title="Registrar Observação"
+        >
+          <form onSubmit={handleSubmitObservation} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Sensor
+              </label>
+              <input
+                type="text"
+                value={selectedReading?.sensor_id || ""}
+                disabled
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tipo de Observação
+              </label>
+              <select
+                value={observationType}
+                onChange={(e) => setObservationType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="general">Geral</option>
+                <option value="maintenance">Manutenção</option>
+                <option value="inspection">Inspeção</option>
+                <option value="issue">Problema</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Observação <span className="text-gray-500">(10-500 caracteres)</span>
+              </label>
+              <textarea
+                value={observationText}
+                onChange={(e) => setObservationText(e.target.value)}
+                rows={5}
+                minLength={10}
+                maxLength={500}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Descreva a observação sobre este dado do sensor..."
+              />
+              <div className="mt-1 text-sm text-gray-500">
+                {observationText.length}/500 caracteres
+                {observationText.length > 0 && observationText.length < 10 && (
+                  <span className="text-red-500 ml-2">Mínimo de 10 caracteres</span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowObservationModal(false)
+                  setObservationText("")
+                  setSelectedReading(null)
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingObservation || observationText.length < 10 || observationText.length > 500}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmittingObservation ? "Salvando..." : "Registrar Observação"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }

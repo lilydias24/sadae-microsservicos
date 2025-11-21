@@ -170,6 +170,16 @@ export function SupportPage() {
   const [newMessage, setNewMessage] = useState('')
   const [showInternalMessages, setShowInternalMessages] = useState(false)
   
+  // AI suggestion state
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    suggestion: string | null
+    confidence: number
+    relevant_articles: Array<{ id: number; title: string; score: number }>
+    suggestions: string[]
+    should_escalate: boolean
+  } | null>(null)
+  const [loadingAiSuggestion, setLoadingAiSuggestion] = useState(false)
+  
   // Evaluation state
   const [showEvaluation, setShowEvaluation] = useState(false)
   const [evaluationForm, setEvaluationForm] = useState({
@@ -406,10 +416,29 @@ export function SupportPage() {
         params: { include_internal: showInternalMessages },
       })
       setTicketMessages(data)
+      
+      // Auto-scroll to bottom when new messages arrive
+      setTimeout(() => {
+        const messagesContainer = document.querySelector('.max-h-96.overflow-y-auto')
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight
+        }
+      }, 100)
     } catch (error) {
       console.error('Error fetching ticket messages:', error)
     }
   }
+  
+  // Auto-refresh messages when ticket is selected (for AI responses)
+  useEffect(() => {
+    if (!selectedTicket?.id) return
+    
+    const interval = setInterval(() => {
+      fetchTicketMessages(selectedTicket.id)
+    }, 3000) // Check every 3 seconds
+    
+    return () => clearInterval(interval)
+  }, [selectedTicket?.id])
 
   const createTicket = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -484,13 +513,65 @@ export function SupportPage() {
     try {
       await api.post(`/support/tickets/${selectedTicket.id}/messages`, { content: newMessage })
       setNewMessage('')
+      setAiSuggestion(null) // Limpar sugestão após enviar
+      
+      // Refresh messages immediately
       if (selectedTicket.id) {
         fetchTicketMessages(selectedTicket.id)
+        
+        // If message is from client, poll for AI response
+        if (user?.role === 'citizen') {
+          // Poll for AI response (check every 2 seconds for 10 seconds)
+          let attempts = 0
+          const maxAttempts = 5
+          const pollInterval = setInterval(async () => {
+            attempts++
+            await fetchTicketMessages(selectedTicket.id)
+            
+            if (attempts >= maxAttempts) {
+              clearInterval(pollInterval)
+            }
+          }, 2000)
+        }
       }
     } catch (error) {
       console.error('Error sending message:', error)
     }
   }
+
+  // Buscar sugestão da IA quando o usuário digitar uma mensagem
+  const fetchAiSuggestion = async (message: string) => {
+    if (!selectedTicket || !message.trim() || message.length < 10) {
+      setAiSuggestion(null)
+      return
+    }
+
+    try {
+      setLoadingAiSuggestion(true)
+      const response = await api.post(`/support/tickets/${selectedTicket.id}/ai-suggest`, {
+        content: message
+      })
+      setAiSuggestion(response.data)
+    } catch (error) {
+      console.error('Error fetching AI suggestion:', error)
+      setAiSuggestion(null)
+    } finally {
+      setLoadingAiSuggestion(false)
+    }
+  }
+
+  // Debounce para buscar sugestão da IA
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (newMessage.trim() && selectedTicket) {
+        fetchAiSuggestion(newMessage)
+      } else {
+        setAiSuggestion(null)
+      }
+    }, 1000) // Aguardar 1 segundo após parar de digitar
+
+    return () => clearTimeout(timer)
+  }, [newMessage, selectedTicket])
 
   const filteredTickets = Array.isArray(tickets) ? tickets.filter(ticket => {
     const matchesSearch = (ticket.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -923,26 +1004,132 @@ export function SupportPage() {
                   )}
                 </div>
                 <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
-                  {ticketMessages.map((message) => (
-                    <div key={message.id} className={`flex ${message.message_type === 'client' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                        message.message_type === 'client' 
-                          ? 'bg-blue-600 text-white'
-                          : message.is_internal
-                          ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="text-xs font-medium">{message.author_name}</span>
-                          {message.is_internal && <span className="text-xs">(Interno)</span>}
-                          <span className="text-xs opacity-75">{formatDate(message.created_at)}</span>
+                  {ticketMessages.map((message) => {
+                    const isAIAssistant = message.author_name === 'Assistente Virtual'
+                    const isClient = message.message_type === 'client'
+                    const isSystem = message.message_type === 'system'
+                    
+                    return (
+                      <div key={message.id} className={`flex ${isClient ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                          isClient
+                            ? 'bg-blue-600 text-white'
+                            : isAIAssistant
+                            ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-gray-800 border-2 border-purple-300'
+                            : message.is_internal
+                            ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                            : isSystem
+                            ? 'bg-gray-50 text-gray-600 border border-gray-200'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          <div className="flex items-center space-x-2 mb-1">
+                            {isAIAssistant && (
+                              <MessageSquare className="w-3 h-3 text-purple-600" />
+                            )}
+                            <span className={`text-xs font-medium ${isAIAssistant ? 'text-purple-700' : ''}`}>
+                              {message.author_name}
+                            </span>
+                            {message.is_internal && <span className="text-xs">(Interno)</span>}
+                            {isAIAssistant && (
+                              <span className="text-xs bg-purple-200 text-purple-700 px-1.5 py-0.5 rounded-full">
+                                IA
+                              </span>
+                            )}
+                            <span className="text-xs opacity-75">{formatDate(message.created_at)}</span>
+                          </div>
+                          <p className="text-sm">{message.content}</p>
                         </div>
-                        <p className="text-sm">{message.content}</p>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 
+                {/* AI Suggestion */}
+                {aiSuggestion && aiSuggestion.suggestion && (
+                  <div className="p-4 border-t bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center">
+                          <MessageSquare className="w-4 h-4 text-white" />
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-semibold text-purple-900">Sugestão da IA</span>
+                            <span className="text-xs text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
+                              {Math.round(aiSuggestion.confidence * 100)}% de confiança
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setAiSuggestion(null)}
+                            className="text-purple-600 hover:text-purple-800"
+                          >
+                            <span className="text-xs">✕</span>
+                          </button>
+                        </div>
+                        <p className="text-sm text-gray-700 mb-3 bg-white p-3 rounded-lg border border-purple-200">
+                          {aiSuggestion.suggestion}
+                        </p>
+                        {aiSuggestion.relevant_articles && aiSuggestion.relevant_articles.length > 0 && (
+                          <div className="mb-3">
+                            <p className="text-xs text-purple-700 mb-1 font-medium">Artigos relacionados:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {aiSuggestion.relevant_articles.slice(0, 3).map((article) => (
+                                <span
+                                  key={article.id}
+                                  className="text-xs bg-white text-purple-700 px-2 py-1 rounded border border-purple-200"
+                                >
+                                  {article.title}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => {
+                              setNewMessage(aiSuggestion.suggestion || '')
+                              setAiSuggestion(null)
+                            }}
+                            className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 font-medium"
+                          >
+                            Usar Sugestão
+                          </button>
+                          {aiSuggestion.suggestions && aiSuggestion.suggestions.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {aiSuggestion.suggestions.slice(0, 2).map((suggestion, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => {
+                                    setNewMessage(suggestion)
+                                    fetchAiSuggestion(suggestion)
+                                  }}
+                                  className="text-xs bg-white text-purple-700 px-2 py-1 rounded border border-purple-200 hover:bg-purple-50"
+                                >
+                                  {suggestion}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {aiSuggestion.should_escalate && (
+                          <div className="mt-2 text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+                            ⚠️ Recomendamos escalar para um agente humano
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {loadingAiSuggestion && (
+                  <div className="p-4 border-t bg-purple-50">
+                    <div className="flex items-center space-x-2 text-sm text-purple-600">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+                      <span>Analisando sua mensagem...</span>
+                    </div>
+                  </div>
+                )}
                 {/* Message Form */}
                 <form onSubmit={sendMessage} className="p-4 border-t">
                   <div className="flex space-x-2">
