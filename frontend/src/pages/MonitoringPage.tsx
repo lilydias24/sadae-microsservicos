@@ -9,6 +9,7 @@ import { useAuth } from "../contexts/AuthContext"
 import { Modal } from "../components/ui"
 import { MessageSquare, Map as MapIcon, List } from "lucide-react"
 import { DigitalTwinMap } from "../components/DigitalTwinMap"
+import { generateSmartMeters } from "../utils/generateSmartMeters"
 
 // --- INTERFACES (mantidas para estrutura) ---
 interface SensorReading {
@@ -110,6 +111,9 @@ export function MonitoringPage() {
   const [isSubmittingObservation, setIsSubmittingObservation] = useState(false)
   const [observations, setObservations] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
+
+  // Generate smart meters based on network sensors
+  const [smartMeters] = useState(() => generateSmartMeters(mockSensors))
 
   // Carregar dados iniciais (apenas uma vez)
   useEffect(() => {
@@ -508,7 +512,7 @@ export function MonitoringPage() {
             <p className="text-sm text-gray-600">Visualização em tempo real dos sensores na rede</p>
           </div>
           <div className="h-[600px]">
-            <DigitalTwinMap sensors={filteredSensors} />
+            <DigitalTwinMap sensors={filteredSensors} smartMeters={smartMeters} />
           </div>
         </div>
       ) : (

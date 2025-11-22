@@ -1,7 +1,10 @@
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useEffect } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { SmartMeter, MeterCluster, clusterSmartMeters } from '../utils/generateSmartMeters'
+import { SmartMeterClusterMarker } from './SmartMeterMarker'
+import { Layers, Eye, EyeOff } from 'lucide-react'
 
 // Fix for default marker icons in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -25,6 +28,7 @@ interface SensorData {
 
 interface DigitalTwinMapProps {
     sensors: SensorData[]
+    smartMeters?: SmartMeter[]
 }
 
 // Custom marker icons based on status
@@ -65,18 +69,35 @@ const createCustomIcon = (status: string = 'normal') => {
     })
 }
 
-// Component to auto-fit bounds
-function AutoFitBounds({ sensors }: { sensors: SensorData[] }) {
-    const map = useMap()
+// Component to track zoom level
+function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
+    const map = useMapEvents({
+        zoomend: () => {
+            onZoomChange(map.getZoom())
+        }
+    })
 
     useEffect(() => {
-        if (sensors.length > 0) {
+        onZoomChange(map.getZoom())
+    }, [map, onZoomChange])
+
+    return null
+}
+
+// Component to auto-fit bounds (only once on initial load)
+function AutoFitBounds({ sensors }: { sensors: SensorData[] }) {
+    const map = useMap()
+    const hasFitted = useRef(false)
+
+    useEffect(() => {
+        if (!hasFitted.current && sensors.length > 0) {
             const validSensors = sensors.filter(s => s.latitude && s.longitude)
             if (validSensors.length > 0) {
                 const bounds = L.latLngBounds(
                     validSensors.map(s => [s.latitude!, s.longitude!])
                 )
                 map.fitBounds(bounds, { padding: [50, 50] })
+                hasFitted.current = true
             }
         }
     }, [sensors, map])
@@ -106,9 +127,17 @@ const translateStatus = (status: string = 'normal'): string => {
     return statusMap[status.toLowerCase()] || status
 }
 
-export function DigitalTwinMap({ sensors }: DigitalTwinMapProps) {
+export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProps) {
+    const [zoom, setZoom] = useState(13)
+    const [showNetworkSensors, setShowNetworkSensors] = useState(true)
+    const [showSmartMeters, setShowSmartMeters] = useState(true)
+    const [showLayerControl, setShowLayerControl] = useState(false)
+
     // Filter sensors that have coordinates
     const sensorsWithCoords = sensors.filter(s => s.latitude && s.longitude)
+
+    // Cluster smart meters based on zoom
+    const meterClusters = clusterSmartMeters(smartMeters, zoom)
 
     // Default center (São Paulo)
     const defaultCenter: [number, number] = [-23.5505, -46.6333]
@@ -126,9 +155,11 @@ export function DigitalTwinMap({ sensors }: DigitalTwinMapProps) {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
+                <ZoomTracker onZoomChange={setZoom} />
                 <AutoFitBounds sensors={sensorsWithCoords} />
 
-                {sensorsWithCoords.map((sensor) => (
+                {/* Network Sensors Layer */}
+                {showNetworkSensors && sensorsWithCoords.map((sensor) => (
                     <Marker
                         key={sensor.sensor_id}
                         position={[sensor.latitude!, sensor.longitude!]}
@@ -155,8 +186,8 @@ export function DigitalTwinMap({ sensors }: DigitalTwinMapProps) {
                                     <p>
                                         <span className="font-medium">Status:</span>{' '}
                                         <span className={`font-semibold ${sensor.status === 'critical' ? 'text-red-600' :
-                                                sensor.status === 'warning' ? 'text-yellow-600' :
-                                                    'text-green-600'
+                                            sensor.status === 'warning' ? 'text-yellow-600' :
+                                                'text-green-600'
                                             }`}>
                                             {translateStatus(sensor.status)}
                                         </span>
@@ -171,24 +202,104 @@ export function DigitalTwinMap({ sensors }: DigitalTwinMapProps) {
                         </Popup>
                     </Marker>
                 ))}
+
+                {/* Smart Meters Layer */}
+                {showSmartMeters && meterClusters.map((cluster, idx) => (
+                    <SmartMeterClusterMarker key={`cluster-${idx}`} cluster={cluster} />
+                ))}
             </MapContainer>
+
+            {/* Layer Control Button */}
+            <button
+                onClick={() => setShowLayerControl(!showLayerControl)}
+                className="absolute top-4 right-4 bg-white p-2 rounded-lg shadow-lg z-[1000] hover:bg-gray-50"
+                title="Controle de Camadas"
+            >
+                <Layers className="w-5 h-5" />
+            </button>
+
+            {/* Layer Control Panel */}
+            {showLayerControl && (
+                <div className="absolute top-16 right-4 bg-white p-3 rounded-lg shadow-lg z-[1000] min-w-[200px]">
+                    <h4 className="font-semibold text-sm mb-3">Camadas</h4>
+                    <div className="space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={showNetworkSensors}
+                                onChange={(e) => setShowNetworkSensors(e.target.checked)}
+                                className="w-4 h-4"
+                            />
+                            <span className="text-sm">Sensores de Rede</span>
+                            {showNetworkSensors ? (
+                                <Eye className="w-4 h-4 ml-auto text-blue-600" />
+                            ) : (
+                                <EyeOff className="w-4 h-4 ml-auto text-gray-400" />
+                            )}
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={showSmartMeters}
+                                onChange={(e) => setShowSmartMeters(e.target.checked)}
+                                className="w-4 h-4"
+                            />
+                            <span className="text-sm">Hidrômetros ({smartMeters.length})</span>
+                            {showSmartMeters ? (
+                                <Eye className="w-4 h-4 ml-auto text-blue-600" />
+                            ) : (
+                                <EyeOff className="w-4 h-4 ml-auto text-gray-400" />
+                            )}
+                        </label>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                        <p className="text-xs text-gray-500">
+                            Zoom: {zoom} {zoom < 14 ? '(clusters)' : '(individual)'}
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* Legend */}
             <div className="absolute bottom-4 right-4 bg-white p-3 rounded-lg shadow-lg z-[1000]">
                 <h4 className="font-semibold text-sm mb-2">Legenda</h4>
-                <div className="space-y-1 text-xs">
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white"></div>
-                        <span>Normal</span>
+                <div className="space-y-2">
+                    <div>
+                        <p className="text-xs font-medium mb-1">Sensores de Rede</p>
+                        <div className="space-y-1 text-xs ml-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white"></div>
+                                <span>Normal</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white"></div>
+                                <span>Aviso</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white"></div>
+                                <span>Crítico</span>
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white"></div>
-                        <span>Aviso</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white"></div>
-                        <span>Crítico</span>
-                    </div>
+                    {smartMeters.length > 0 && (
+                        <div className="pt-2 border-t border-gray-200">
+                            <p className="text-xs font-medium mb-1">Hidrômetros</p>
+                            <div className="space-y-1 text-xs ml-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-green-500 border border-white"></div>
+                                    <span>Residencial</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-green-500 border border-white" style={{ borderRadius: '2px' }}></div>
+                                    <span>Comercial</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-green-500 border border-white"></div>
+                                    <span>Industrial</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
