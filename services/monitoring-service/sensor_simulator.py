@@ -22,6 +22,8 @@ class SensorSimulator:
                 "name": "Pressure Sensor 1",
                 "type": SensorType.PRESSURE,
                 "location": "Zona Norte - Reservatório Principal",
+                "latitude": -23.5505,
+                "longitude": -46.6333,
                 "unit": "bar",
                 "base_value": 3.5,
                 "variation": 0.5
@@ -31,6 +33,8 @@ class SensorSimulator:
                 "name": "Flow Sensor 1",
                 "type": SensorType.FLOW,
                 "location": "Adutora Principal",
+                "latitude": -23.5489,
+                "longitude": -46.6388,
                 "unit": "L/s",
                 "base_value": 150.0,
                 "variation": 20.0
@@ -40,6 +44,8 @@ class SensorSimulator:
                 "name": "Water Quality Sensor 1",
                 "type": SensorType.WATER_QUALITY,
                 "location": "Estação de Tratamento",
+                "latitude": -23.5558,
+                "longitude": -46.6396,
                 "unit": "%",
                 "base_value": 85.0,
                 "variation": 5.0
@@ -49,6 +55,8 @@ class SensorSimulator:
                 "name": "Rain Gauge 1",
                 "type": SensorType.PRECIPITATION,
                 "location": "Estação Meteorológica",
+                "latitude": -23.5475,
+                "longitude": -46.6361,
                 "unit": "mm/h",
                 "base_value": 0.0,
                 "variation": 2.0
@@ -58,6 +66,8 @@ class SensorSimulator:
                 "name": "River Level Sensor 1",
                 "type": SensorType.RIVER_LEVEL,
                 "location": "Rio Principal",
+                "latitude": -23.5520,
+                "longitude": -46.6420,
                 "unit": "m",
                 "base_value": 2.5,
                 "variation": 0.3
@@ -77,6 +87,8 @@ class SensorSimulator:
                             "name": sensor["name"],
                             "sensor_type": sensor["type"],
                             "location": sensor["location"],
+                            "latitude": sensor.get("latitude"),
+                            "longitude": sensor.get("longitude"),
                             "unit": sensor["unit"],
                             "min_threshold": 0.0,
                             "max_threshold": sensor["base_value"] * 2
@@ -108,6 +120,8 @@ class SensorSimulator:
                         "name": sensor["name"],
                         "sensor_type": sensor["type"],
                         "location": sensor["location"],
+                        "latitude": sensor.get("latitude"),
+                        "longitude": sensor.get("longitude"),
                         "unit": sensor["unit"],
                         "min_threshold": 0.0,
                         "max_threshold": sensor["base_value"] * 2
