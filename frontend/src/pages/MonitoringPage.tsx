@@ -35,12 +35,48 @@ interface Anomaly {
 
 // --- DADOS MOCADOS ---
 const mockSensors: SensorReading[] = [
-  { id: "s1", sensor_id: "P-101", sensor_type: "pressure", value: 3.5, unit: "bar", timestamp: new Date().toISOString(), location: "Estação Central", latitude: -23.5505, longitude: -46.6333, status: "normal" },
-  { id: "s2", sensor_id: "F-203", sensor_type: "flow", value: 150.2, unit: "m³/h", timestamp: new Date().toISOString(), location: "Reservatório Norte", latitude: -23.5489, longitude: -46.6388, status: "normal" },
-  { id: "s3", sensor_id: "L-301", sensor_type: "level", value: 85, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Sul", latitude: -23.5558, longitude: -46.6396, status: "warning" },
-  { id: "s4", sensor_id: "Q-405", sensor_type: "quality", value: 0.5, unit: "mg/L", timestamp: new Date().toISOString(), location: "Rede Distrital Leste", latitude: -23.5475, longitude: -46.6361, status: "normal" },
-  { id: "s5", sensor_id: "P-102", sensor_type: "pressure", value: 4.8, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Industrial", latitude: -23.5520, longitude: -46.6420, status: "critical" },
-  { id: "s6", sensor_id: "PC-501", sensor_type: "precipitation", value: 2.1, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Meteorológica", latitude: -23.5540, longitude: -46.6300, status: "normal" },
+  // Zona Central
+  { id: "s1", sensor_id: "P-101", sensor_type: "pressure", value: 3.5, unit: "bar", timestamp: new Date().toISOString(), location: "Estação Central - Sé", latitude: -23.5505, longitude: -46.6333, status: "normal" },
+  { id: "s2", sensor_id: "F-102", sensor_type: "flow", value: 150.2, unit: "m³/h", timestamp: new Date().toISOString(), location: "República", latitude: -23.5443, longitude: -46.6431, status: "normal" },
+  { id: "s3", sensor_id: "Q-103", sensor_type: "quality", value: 0.5, unit: "mg/L", timestamp: new Date().toISOString(), location: "Consolação", latitude: -23.5537, longitude: -46.6602, status: "normal" },
+
+  // Zona Norte
+  { id: "s4", sensor_id: "P-201", sensor_type: "pressure", value: 3.8, unit: "bar", timestamp: new Date().toISOString(), location: "Santana", latitude: -23.5089, longitude: -46.6289, status: "normal" },
+  { id: "s5", sensor_id: "F-202", sensor_type: "flow", value: 180.5, unit: "m³/h", timestamp: new Date().toISOString(), location: "Tucuruvi", latitude: -23.4801, longitude: -46.6025, status: "normal" },
+  { id: "s6", sensor_id: "L-203", sensor_type: "level", value: 92, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Cantareira", latitude: -23.4489, longitude: -46.6388, status: "normal" },
+  { id: "s7", sensor_id: "P-204", sensor_type: "pressure", value: 3.2, unit: "bar", timestamp: new Date().toISOString(), location: "Casa Verde", latitude: -23.5178, longitude: -46.6567, status: "normal" },
+
+  // Zona Sul
+  { id: "s8", sensor_id: "P-301", sensor_type: "pressure", value: 3.6, unit: "bar", timestamp: new Date().toISOString(), location: "Vila Mariana", latitude: -23.5881, longitude: -46.6386, status: "normal" },
+  { id: "s9", sensor_id: "L-302", sensor_type: "level", value: 85, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Guarapiranga", latitude: -23.6558, longitude: -46.6396, status: "warning" },
+  { id: "s10", sensor_id: "F-303", sensor_type: "flow", value: 165.3, unit: "m³/h", timestamp: new Date().toISOString(), location: "Santo Amaro", latitude: -23.6528, longitude: -46.7056, status: "normal" },
+  { id: "s11", sensor_id: "Q-304", sensor_type: "quality", value: 0.4, unit: "mg/L", timestamp: new Date().toISOString(), location: "Interlagos", latitude: -23.6806, longitude: -46.6750, status: "normal" },
+  { id: "s12", sensor_id: "P-305", sensor_type: "pressure", value: 3.9, unit: "bar", timestamp: new Date().toISOString(), location: "Jabaquara", latitude: -23.6178, longitude: -46.6428, status: "normal" },
+
+  // Zona Leste
+  { id: "s13", sensor_id: "P-401", sensor_type: "pressure", value: 3.3, unit: "bar", timestamp: new Date().toISOString(), location: "Tatuapé", latitude: -23.5408, longitude: -46.5767, status: "normal" },
+  { id: "s14", sensor_id: "F-402", sensor_type: "flow", value: 142.8, unit: "m³/h", timestamp: new Date().toISOString(), location: "Penha", latitude: -23.5289, longitude: -46.5411, status: "normal" },
+  { id: "s15", sensor_id: "Q-403", sensor_type: "quality", value: 0.6, unit: "mg/L", timestamp: new Date().toISOString(), location: "São Miguel", latitude: -23.4975, longitude: -46.4361, status: "normal" },
+  { id: "s16", sensor_id: "L-404", sensor_type: "level", value: 78, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Aricanduva", latitude: -23.5625, longitude: -46.5178, status: "warning" },
+
+  // Zona Oeste
+  { id: "s17", sensor_id: "P-501", sensor_type: "pressure", value: 4.1, unit: "bar", timestamp: new Date().toISOString(), location: "Pinheiros", latitude: -23.5617, longitude: -46.6822, status: "normal" },
+  { id: "s18", sensor_id: "F-502", sensor_type: "flow", value: 195.7, unit: "m³/h", timestamp: new Date().toISOString(), location: "Lapa", latitude: -23.5283, longitude: -46.7056, status: "normal" },
+  { id: "s19", sensor_id: "Q-503", sensor_type: "quality", value: 0.3, unit: "mg/L", timestamp: new Date().toISOString(), location: "Butantã", latitude: -23.5736, longitude: -46.7286, status: "normal" },
+  { id: "s20", sensor_id: "P-504", sensor_type: "pressure", value: 4.8, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Industrial - Jaguaré", latitude: -23.5520, longitude: -46.7420, status: "critical" },
+
+  // Estações de Tratamento
+  { id: "s21", sensor_id: "Q-601", sensor_type: "quality", value: 0.2, unit: "mg/L", timestamp: new Date().toISOString(), location: "ETA Guaraú", latitude: -23.4650, longitude: -46.6150, status: "normal" },
+  { id: "s22", sensor_id: "Q-602", sensor_type: "quality", value: 0.3, unit: "mg/L", timestamp: new Date().toISOString(), location: "ETA Alto da Boa Vista", latitude: -23.6350, longitude: -46.6850, status: "normal" },
+
+  // Monitoramento Meteorológico
+  { id: "s23", sensor_id: "PC-701", sensor_type: "precipitation", value: 2.1, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Meteorológica - Ibirapuera", latitude: -23.5875, longitude: -46.6575, status: "normal" },
+  { id: "s24", sensor_id: "PC-702", sensor_type: "precipitation", value: 0.0, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Norte", latitude: -23.4900, longitude: -46.6200, status: "normal" },
+  { id: "s25", sensor_id: "PC-703", sensor_type: "precipitation", value: 1.5, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Sul", latitude: -23.6500, longitude: -46.6800, status: "normal" },
+
+  // Pontos Críticos
+  { id: "s26", sensor_id: "P-801", sensor_type: "pressure", value: 2.1, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Crítica - Capão Redondo", latitude: -23.6689, longitude: -46.7789, status: "warning" },
+  { id: "s27", sensor_id: "F-802", sensor_type: "flow", value: 95.3, unit: "m³/h", timestamp: new Date().toISOString(), location: "Brasilândia", latitude: -23.4650, longitude: -46.6850, status: "warning" },
 ];
 
 const mockAnomalies: Anomaly[] = [
