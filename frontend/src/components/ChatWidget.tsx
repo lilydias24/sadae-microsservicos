@@ -1,9 +1,10 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from 'react'
-import { MessageSquare, X, Send, Bot, User, Loader2 } from 'lucide-react'
+import { MessageSquare, X, Send, Bot, User, Loader2, Wifi, WifiOff } from 'lucide-react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useChatWebSocket } from '../hooks/useChatWebSocket'
 
 interface ChatMessage {
   id: string
@@ -26,12 +27,40 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
   const [currentTicketId, setCurrentTicketId] = useState<number | null>(initialTicketId || null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
+  
+  // WebSocket hook - só conecta se tiver ticket
+  const { 
+    messages: wsMessages, 
+    isConnected: wsConnected, 
+    sendMessage: wsSendMessage,
+    sendTyping: wsSendTyping,
+    error: wsError 
+  } = useChatWebSocket(currentTicketId)
+
+  // Sincronizar mensagens do WebSocket
+  useEffect(() => {
+    if (currentTicketId && wsMessages.length > 0) {
+      // Converter mensagens do WebSocket para o formato do widget
+      const convertedMessages: ChatMessage[] = wsMessages.map((msg) => ({
+        id: `msg-${msg.id}`,
+        content: msg.content,
+        sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
+        timestamp: new Date(msg.created_at),
+        ticket_id: msg.ticket_id
+      }))
+      
+      setMessages(convertedMessages)
+    }
+  }, [wsMessages, currentTicketId])
 
   useEffect(() => {
-    if (isOpen && messages.length === 0) {
+    if (isOpen && messages.length === 0 && !currentTicketId) {
       initializeChat()
+    } else if (isOpen && currentTicketId && wsMessages.length === 0) {
+      // Carregar mensagens existentes do ticket
+      loadTicketMessages()
     }
-  }, [isOpen])
+  }, [isOpen, currentTicketId])
 
   useEffect(() => {
     scrollToBottom()
@@ -129,48 +158,82 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
     }
   }
 
+  const loadTicketMessages = async () => {
+    if (!currentTicketId) return
+    
+    try {
+      setIsLoading(true)
+      const { data: ticketMessages } = await api.get(`/support/tickets/${currentTicketId}/messages`)
+      
+      if (Array.isArray(ticketMessages)) {
+        const convertedMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
+          id: `msg-${msg.id}`,
+          content: msg.content,
+          sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
+          timestamp: new Date(msg.created_at),
+          ticket_id: currentTicketId
+        }))
+        setMessages(convertedMessages)
+      }
+    } catch (error) {
+      console.error('Erro ao carregar mensagens do ticket:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!inputMessage.trim() || isTyping) return
 
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      content: inputMessage,
-      sender: 'user',
-      timestamp: new Date(),
-      ticket_id: currentTicketId || undefined
+    const messageToSend = inputMessage
+    setInputMessage('')
+
+    // Se tiver ticket e WebSocket conectado, usar WebSocket
+    if (currentTicketId && wsConnected) {
+      setIsTyping(true)
+      wsSendMessage(messageToSend)
+      // WebSocket vai atualizar as mensagens automaticamente
+      setIsTyping(false)
+      return
     }
 
-    setMessages(prev => [...prev, userMessage])
-    setInputMessage('')
-    setIsTyping(true)
-
-    try {
-      // Buscar resposta do bot
-      const botResponse = await getBotResponse(inputMessage)
-
-      // Aguardar um pouco para simular digitação
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      const botMessage: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        content: botResponse,
-        sender: 'bot',
-        timestamp: new Date(),
-        ticket_id: currentTicketId || undefined
+    // Se não tiver ticket, criar um primeiro
+    if (!currentTicketId) {
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        content: messageToSend,
+        sender: 'user',
+        timestamp: new Date()
       }
 
-      setMessages(prev => [...prev, botMessage])
+      setMessages(prev => [...prev, userMessage])
+      setIsTyping(true)
 
-      // Se o usuário quer criar ticket, criar automaticamente após algumas mensagens
-      if (inputMessage.toLowerCase().includes('criar') || inputMessage.toLowerCase().includes('ticket')) {
-        if (!currentTicketId) {
-          const ticketId = await createTicketFromChat(inputMessage)
+      try {
+        // Buscar resposta do bot
+        const botResponse = await getBotResponse(messageToSend)
+
+        // Aguardar um pouco para simular digitação
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        const botMessage: ChatMessage = {
+          id: `bot-${Date.now()}`,
+          content: botResponse,
+          sender: 'bot',
+          timestamp: new Date()
+        }
+
+        setMessages(prev => [...prev, botMessage])
+
+        // Se o usuário quer criar ticket, criar automaticamente
+        if (messageToSend.toLowerCase().includes('criar') || messageToSend.toLowerCase().includes('ticket')) {
+          const ticketId = await createTicketFromChat(messageToSend)
           if (ticketId) {
             setCurrentTicketId(ticketId)
             const ticketMessage: ChatMessage = {
               id: `ticket-${Date.now()}`,
-              content: `✅ Ticket criado com sucesso! Número: #${ticketId}\n\nUm atendente entrará em contato em breve. Você pode acompanhar o status do ticket na área de Suporte.`,
+              content: `✅ Ticket criado com sucesso! Número: #${ticketId}\n\nAgora você pode conversar em tempo real.`,
               sender: 'bot',
               timestamp: new Date(),
               ticket_id: ticketId
@@ -178,18 +241,32 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
             setMessages(prev => [...prev, ticketMessage])
           }
         }
+      } catch (error) {
+        console.error('Erro ao processar mensagem:', error)
+        const errorMessage: ChatMessage = {
+          id: `error-${Date.now()}`,
+          content: 'Desculpe, ocorreu um erro. Por favor, tente novamente ou crie um ticket diretamente.',
+          sender: 'bot',
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, errorMessage])
+      } finally {
+        setIsTyping(false)
       }
-    } catch (error) {
-      console.error('Erro ao processar mensagem:', error)
-      const errorMessage: ChatMessage = {
-        id: `error-${Date.now()}`,
-        content: 'Desculpe, ocorreu um erro. Por favor, tente novamente ou crie um ticket diretamente.',
-        sender: 'bot',
-        timestamp: new Date()
+    } else {
+      // Fallback: usar API REST se WebSocket não estiver conectado
+      try {
+        setIsTyping(true)
+        await api.post(`/support/tickets/${currentTicketId}/messages`, {
+          content: messageToSend
+        })
+        // Recarregar mensagens
+        await loadTicketMessages()
+      } catch (error) {
+        console.error('Erro ao enviar mensagem:', error)
+      } finally {
+        setIsTyping(false)
       }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsTyping(false)
     }
   }
 
@@ -218,7 +295,18 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
               </div>
               <div>
                 <h3 className="font-semibold">Atendimento SADAE</h3>
-                <p className="text-xs text-blue-100">Assistente Virtual</p>
+                <div className="flex items-center space-x-2">
+                  <p className="text-xs text-blue-100">Assistente Virtual</p>
+                  {currentTicketId && (
+                    <>
+                      {wsConnected ? (
+                        <Wifi className="w-3 h-3 text-green-300" aria-label="Conectado" />
+                      ) : (
+                        <WifiOff className="w-3 h-3 text-yellow-300" aria-label="Desconectado" />
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <button

@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { Bot, User, Send, Loader2, MessageSquare, Ticket, Search, X } from 'lucide-react'
+import { Bot, User, Send, Loader2, MessageSquare, Ticket, Search, X, Wifi, WifiOff } from 'lucide-react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useChatWebSocket } from '../hooks/useChatWebSocket'
 
 interface ChatMessage {
   id: string
@@ -25,6 +26,30 @@ export function ChatPage() {
   const [chatHistory, setChatHistory] = useState<Array<{ id: number; title: string; created_at: string }>>([])
   const [showHistory, setShowHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  // WebSocket hook
+  const { 
+    messages: wsMessages, 
+    isConnected: wsConnected, 
+    sendMessage: wsSendMessage,
+    sendTyping: wsSendTyping,
+    error: wsError 
+  } = useChatWebSocket(currentTicketId)
+  
+  // Sincronizar mensagens do WebSocket
+  useEffect(() => {
+    if (currentTicketId && wsMessages.length > 0) {
+      const convertedMessages: ChatMessage[] = wsMessages.map((msg) => ({
+        id: `msg-${msg.id}`,
+        content: msg.content,
+        sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
+        timestamp: new Date(msg.created_at),
+        ticket_id: msg.ticket_id,
+        author_name: msg.author_name
+      }))
+      setMessages(convertedMessages)
+    }
+  }, [wsMessages, currentTicketId])
 
   useEffect(() => {
     if (user) {
@@ -433,40 +458,47 @@ Quer simular o valor da sua próxima fatura?`
         }
       }
 
-      // Se temos ticket, enviar mensagem e aguardar resposta da IA
+      // Se temos ticket, usar WebSocket se conectado, senão usar API REST
       if (ticketId) {
-        // Enviar mensagem para o ticket (isso dispara a resposta automática da IA)
-        await api.post(`/support/tickets/${ticketId}/messages`, {
-          content: messageToSend
-        })
-        
-        // Aguardar resposta da IA
-        const aiResponse = await waitForAIResponse(ticketId, userMessage.timestamp)
-        
-        if (aiResponse) {
-          const botMessage: ChatMessage = {
-            id: `bot-${Date.now()}`,
-            content: aiResponse,
-            sender: 'bot',
-            timestamp: new Date(),
-            ticket_id: ticketId,
-            author_name: 'Assistente Virtual'
-          }
-          setMessages(prev => [...prev, botMessage])
+        if (wsConnected) {
+          // Usar WebSocket - mensagens serão atualizadas automaticamente
+          wsSendMessage(messageToSend)
+          setIsTyping(false)
         } else {
-          // Fallback: usar chit chat e perguntas comuns primeiro
-          const fallbackResponse = await getBotResponse(messageToSend)
-          if (fallbackResponse) {
+          // Fallback: usar API REST
+          await api.post(`/support/tickets/${ticketId}/messages`, {
+            content: messageToSend
+          })
+          
+          // Aguardar resposta da IA
+          const aiResponse = await waitForAIResponse(ticketId, userMessage.timestamp)
+          
+          if (aiResponse) {
             const botMessage: ChatMessage = {
               id: `bot-${Date.now()}`,
-              content: fallbackResponse,
+              content: aiResponse,
               sender: 'bot',
               timestamp: new Date(),
               ticket_id: ticketId,
               author_name: 'Assistente Virtual'
             }
             setMessages(prev => [...prev, botMessage])
+          } else {
+            // Fallback: usar chit chat e perguntas comuns primeiro
+            const fallbackResponse = await getBotResponse(messageToSend)
+            if (fallbackResponse) {
+              const botMessage: ChatMessage = {
+                id: `bot-${Date.now()}`,
+                content: fallbackResponse,
+                sender: 'bot',
+                timestamp: new Date(),
+                ticket_id: ticketId,
+                author_name: 'Assistente Virtual'
+              }
+              setMessages(prev => [...prev, botMessage])
+            }
           }
+          setIsTyping(false)
         }
       } else {
         // Sem ticket: usar respostas diretas (chit chat já foi verificado acima)
@@ -589,7 +621,18 @@ Quer simular o valor da sua próxima fatura?`
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">Atendimento SADAE</h3>
-              <p className="text-xs text-gray-500">Assistente Virtual</p>
+              <div className="flex items-center space-x-2">
+                <p className="text-xs text-gray-500">Assistente Virtual</p>
+                {currentTicketId && (
+                  <>
+                    {wsConnected ? (
+                      <Wifi className="w-3 h-3 text-green-500" aria-label="Conectado" />
+                    ) : (
+                      <WifiOff className="w-3 h-3 text-yellow-500" aria-label="Desconectado" />
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
           {currentTicketId && (
