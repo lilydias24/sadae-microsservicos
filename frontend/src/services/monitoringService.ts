@@ -91,6 +91,68 @@ export const monitoringDev = {
     // Backend espera new_status como query param (tipo primitivo), não no corpo
     return monitoringDirect.put(`/anomalies/${anomalyId}/status`, null, { params: { new_status: newStatus } })
   },
+
+  getThresholds(sensorType: string): Promise<AxiosResponse<{ min: number; max: number; deviation_factor: number }>> {
+    console.log("[MonitoringService] Buscando limiares", {
+      sensorType,
+      endpoint: "/detector/thresholds",
+      timestamp: new Date().toISOString()
+    })
+    return monitoringDirect.get("/detector/thresholds", { params: { sensor_type: sensorType } })
+      .then(response => {
+        console.log("[MonitoringService] Limiares obtidos com sucesso", {
+          sensorType,
+          thresholds: response.data,
+          timestamp: new Date().toISOString()
+        })
+        return response
+      })
+      .catch(error => {
+        console.error("[MonitoringService] Erro ao buscar limiares", {
+          sensorType,
+          error: error instanceof Error ? error.message : String(error),
+          response: error.response?.data,
+          status: error.response?.status,
+          timestamp: new Date().toISOString()
+        })
+        throw error
+      })
+  },
+
+  updateThresholds(sensorType: string, min: number, max: number): Promise<AxiosResponse<{ ok: boolean; thresholds: { min: number; max: number; deviation_factor: number } }>> {
+    console.log("[MonitoringService] Atualizando limiares", {
+      sensorType,
+      min,
+      max,
+      endpoint: "/detector/thresholds",
+      timestamp: new Date().toISOString()
+    })
+    return monitoringDirect.put("/detector/thresholds", {
+      sensor_type: sensorType,
+      min,
+      max
+    })
+      .then(response => {
+        console.log("[MonitoringService] Limiares atualizados com sucesso", {
+          sensorType,
+          response: response.data,
+          timestamp: new Date().toISOString()
+        })
+        return response
+      })
+      .catch(error => {
+        console.error("[MonitoringService] Erro ao atualizar limiares", {
+          sensorType,
+          min,
+          max,
+          error: error instanceof Error ? error.message : String(error),
+          response: error.response?.data,
+          status: error.response?.status,
+          timestamp: new Date().toISOString()
+        })
+        throw error
+      })
+  },
 }
 
 

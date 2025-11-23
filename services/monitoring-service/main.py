@@ -107,13 +107,36 @@ class ThresholdUpdate(BaseModel):
 @app.get("/detector/thresholds")
 async def get_detector_thresholds(sensor_type: SensorType):
     """Get current thresholds for a sensor type"""
-    return anomaly_detector.get_thresholds(sensor_type)
+    try:
+        print(f"[MonitoringService] GET /detector/thresholds - sensor_type={sensor_type}")
+        thresholds = anomaly_detector.get_thresholds(sensor_type)
+        print(f"[MonitoringService] Limiares obtidos com sucesso: {thresholds}")
+        return thresholds
+    except Exception as e:
+        print(f"[MonitoringService] ERRO ao obter limiares: {str(e)}", exc_info=True)
+        raise
 
 @app.put("/detector/thresholds")
 async def update_detector_thresholds(payload: ThresholdUpdate):
     """Update min/max thresholds for a sensor type"""
-    await anomaly_detector.update_thresholds("_any", payload.sensor_type, payload.min, payload.max)
-    return {"ok": True, "thresholds": anomaly_detector.get_thresholds(payload.sensor_type)}
+    try:
+        print(f"[MonitoringService] PUT /detector/thresholds - sensor_type={payload.sensor_type}, min={payload.min}, max={payload.max}")
+        
+        # Validação
+        if payload.min >= payload.max:
+            error_msg = f"min ({payload.min}) deve ser menor que max ({payload.max})"
+            print(f"[MonitoringService] ERRO de validação: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        await anomaly_detector.update_thresholds("_any", payload.sensor_type, payload.min, payload.max)
+        updated_thresholds = anomaly_detector.get_thresholds(payload.sensor_type)
+        print(f"[MonitoringService] Limiares atualizados com sucesso: {updated_thresholds}")
+        return {"ok": True, "thresholds": updated_thresholds}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[MonitoringService] ERRO ao atualizar limiares: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar limiares: {str(e)}")
 
 @app.post("/detector/cache/reset")
 async def reset_detector_cache():
@@ -500,13 +523,50 @@ async def generate_sensor_report(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time monitoring"""
-    await manager.connect(websocket)
+    client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+    print(f"[MonitoringService] WebSocket: Nova conexão de {client_info}")
+    
     try:
+        await manager.connect(websocket)
+        print(f"[MonitoringService] WebSocket: Conexão aceita - Total: {len(manager.active_connections)}")
+        
         while True:
-            # Keep connection alive
-            await websocket.receive_text()
+            # Receber mensagem do cliente
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                message_type = message.get("type", "unknown")
+                
+                print(f"[MonitoringService] WebSocket: Mensagem recebida - type={message_type}, client={client_info}")
+                
+                # Processar ping e responder com pong
+                if message_type == "ping":
+                    ping_timestamp = message.get("timestamp")
+                    pong_response = {
+                        "type": "pong",
+                        "timestamp": ping_timestamp
+                    }
+                    await websocket.send_text(json.dumps(pong_response))
+                    print(f"[MonitoringService] WebSocket: Pong enviado - timestamp={ping_timestamp}")
+                else:
+                    print(f"[MonitoringService] WebSocket: Tipo de mensagem não processado - {message_type}")
+                    
+            except json.JSONDecodeError as e:
+                print(f"[MonitoringService] WebSocket: ERRO ao decodificar JSON - {str(e)}, data={data[:100]}")
+                # Se não for JSON, ignorar (mensagem de texto simples)
+                pass
+            except Exception as e:
+                print(f"[MonitoringService] WebSocket: ERRO ao processar mensagem - {str(e)}", exc_info=True)
+                
     except WebSocketDisconnect:
+        print(f"[MonitoringService] WebSocket: Cliente desconectado - {client_info}")
         manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[MonitoringService] WebSocket: ERRO na conexão - {str(e)}", exc_info=True)
+        try:
+            manager.disconnect(websocket)
+        except:
+            pass
 
 # Background tasks
 async def detect_anomaly(reading: SensorReading):

@@ -1,13 +1,11 @@
-"use client"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { monitoringDev } from "../services/monitoringService"
 import { useWebSocket } from "../contexts/WebSocketContext"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api } from "../services/api"
 import { useAuth } from "../contexts/AuthContext"
 import { Modal } from "../components/ui"
-import { MessageSquare, Map as MapIcon, List } from "lucide-react"
+import { MessageSquare, Map as MapIcon, List, Wifi, WifiOff, AlertCircle, CheckCircle2, Clock, Settings, Inbox, Bell, Save, X } from "lucide-react"
 import { DigitalTwinMap } from "../components/DigitalTwinMap"
 import { generateSmartMeters } from "../utils/generateSmartMeters"
 
@@ -95,7 +93,152 @@ const mockRealtimeChartData = Array.from({ length: 50 }, (_, i) => ({
 export function MonitoringPage() {
   const { user } = useAuth()
   const [selectedSensorType, setSelectedSensorType] = useState<string>("all")
-  const { sensorData, alerts, isConnected, lastMessage } = useWebSocket()
+  const [statusKey, setStatusKey] = useState(0) // Forçar re-render quando status mudar
+  const { 
+    sensorData, 
+    alerts, 
+    isConnected, 
+    lastMessage,
+    connectionStatus,
+    reconnectCount,
+    lastMessageTime,
+    latency,
+    connectionUptime
+  } = useWebSocket()
+
+  // Debug: Log quando status ou reconnectCount mudarem
+  useEffect(() => {
+    console.log("[MonitoringPage] Status ou reconnectCount mudaram", {
+      connectionStatus,
+      reconnectCount,
+      timestamp: new Date().toISOString(),
+      statusType: typeof connectionStatus,
+      statusValue: connectionStatus,
+      isValidStatus: ['disconnected', 'connecting', 'connected', 'reconnecting'].includes(connectionStatus),
+      willShowReconnecting: connectionStatus === 'reconnecting' && reconnectCount > 0,
+      willShowConnecting: connectionStatus === 'connecting'
+    })
+    // Forçar atualização da key para garantir re-render
+    setStatusKey(prev => prev + 1)
+    
+    // FORÇAR ATUALIZAÇÃO DO DOM DIRETAMENTE
+    const updateStatusText = () => {
+      const statusElement = document.querySelector('[data-testid="status-text"]') as HTMLElement | null
+      if (statusElement) {
+        let displayText = ''
+        if (connectionStatus === 'connected') {
+          displayText = 'Conectado'
+        } else if (connectionStatus === 'connecting') {
+          displayText = 'Conectando...'
+        } else if (connectionStatus === 'reconnecting') {
+          displayText = reconnectCount > 0 ? `Reconectando... (${reconnectCount})` : 'Reconectando...'
+        } else if (connectionStatus === 'disconnected') {
+          displayText = reconnectCount > 0 ? `Desconectado (tentativa ${reconnectCount})` : 'Desconectado'
+        } else {
+          displayText = 'Desconhecido'
+        }
+        
+        // Atualizar diretamente no DOM - FORÇAR
+        statusElement.textContent = displayText
+        statusElement.innerText = displayText
+        statusElement.setAttribute('data-status', connectionStatus)
+        statusElement.setAttribute('data-reconnect-count', String(reconnectCount))
+        
+        // Forçar reflow para garantir atualização visual
+        void statusElement.offsetHeight
+        
+        console.log("[MonitoringPage] DOM atualizado FORÇADAMENTE:", {
+          displayText,
+          connectionStatus,
+          reconnectCount,
+          elementTextContent: statusElement.textContent,
+          elementInnerText: statusElement.innerText,
+          timestamp: new Date().toISOString()
+        })
+      } else {
+        console.warn("[MonitoringPage] Elemento status-text não encontrado no DOM")
+      }
+    }
+    
+    // Atualizar imediatamente
+    updateStatusText()
+    
+    // Atualizar novamente após delays para garantir
+    const timeout1 = setTimeout(updateStatusText, 50)
+    const timeout2 = setTimeout(updateStatusText, 200)
+    
+    return () => {
+      clearTimeout(timeout1)
+      clearTimeout(timeout2)
+    }
+  }, [connectionStatus, reconnectCount])
+  
+  // Código antigo de verificação (mantido para debug)
+  useEffect(() => {
+    setTimeout(() => {
+      const statusElement = document.querySelector('[data-testid="status-text"]') as HTMLElement | null
+      if (statusElement) {
+        // Obter valores atuais do estado através dos atributos data do elemento pai
+        const parentDiv = statusElement.closest('[data-status]') as HTMLElement | null
+        const currentStatus = parentDiv?.getAttribute('data-status') || connectionStatus
+        const currentReconnectCount = parseInt(parentDiv?.getAttribute('data-reconnect-count') || '0', 10) || reconnectCount
+        
+        const computedStyle = window.getComputedStyle(statusElement)
+        const parentElement = statusElement.parentElement
+        const parentComputedStyle = parentElement ? window.getComputedStyle(parentElement) : null
+        
+        // Calcular texto esperado
+        let expectedText = ''
+        if (currentStatus === 'connected') {
+          expectedText = 'Conectado'
+        } else if (currentStatus === 'connecting') {
+          expectedText = 'Conectando...'
+        } else if (currentStatus === 'reconnecting') {
+          expectedText = currentReconnectCount > 0 ? `Reconectando... (${currentReconnectCount})` : 'Reconectando...'
+        } else if (currentStatus === 'disconnected') {
+          expectedText = currentReconnectCount > 0 ? `Desconectado (tentativa ${currentReconnectCount})` : 'Desconectado'
+        } else {
+          expectedText = 'Desconhecido'
+        }
+        
+        console.log("[MonitoringPage] Elemento DOM encontrado:", {
+          textContent: statusElement.textContent,
+          innerText: statusElement.innerText || statusElement.textContent,
+          expectedText,
+          currentStatus,
+          currentReconnectCount,
+          connectionStatus,
+          reconnectCount,
+          isVisible: computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden' && computedStyle.opacity !== '0',
+          display: computedStyle.display,
+          visibility: computedStyle.visibility,
+          opacity: computedStyle.opacity,
+          parentDisplay: parentComputedStyle?.display,
+          parentVisibility: parentComputedStyle?.visibility,
+          timestamp: new Date().toISOString()
+        })
+        
+        // Forçar atualização visual se não corresponder
+        if (statusElement.textContent !== expectedText) {
+          console.warn("[MonitoringPage] Texto no DOM não corresponde! Atualizando forçadamente...", {
+            atual: statusElement.textContent,
+            esperado: expectedText
+          })
+          statusElement.textContent = expectedText
+        }
+      } else {
+        console.warn("[MonitoringPage] Elemento DOM não encontrado!")
+      }
+    }, 100)
+  }, [connectionStatus, reconnectCount])
+
+  // Debug: Log no render para verificar se está re-renderizando
+  console.log("[MonitoringPage] RENDER - Status atual", {
+    connectionStatus,
+    reconnectCount,
+    timestamp: new Date().toISOString(),
+    renderCount: Date.now()
+  })
 
   // Estado vindo do backend, com fallback para mocks
   const [realtimeData, setRealtimeData] = useState<any[]>([])
@@ -112,12 +255,65 @@ export function MonitoringPage() {
   const [observations, setObservations] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
 
+  // Estados para configuração de alertas
+  const [showAlertConfigModal, setShowAlertConfigModal] = useState(false)
+  const [thresholds, setThresholds] = useState<Record<string, { min: number; max: number; deviation_factor: number }>>({})
+  const [editingThresholds, setEditingThresholds] = useState<Record<string, { min: number; max: number }>>({})
+  const [isLoadingThresholds, setIsLoadingThresholds] = useState(false)
+  const [isSavingThresholds, setIsSavingThresholds] = useState(false)
+
+  // Debug: Log quando modal mudar
+  useEffect(() => {
+    console.log("[MonitoringPage] Estado do modal de alertas mudou", {
+      showAlertConfigModal,
+      timestamp: new Date().toISOString()
+    })
+  }, [showAlertConfigModal])
+
+  // Debug: Verificar se botão está no DOM e adicionar listener direto
+  useEffect(() => {
+    const checkButton = () => {
+      // Procurar por qualquer botão que contenha "Configurar Alertas"
+      const buttons = document.querySelectorAll('button')
+      let foundButton: HTMLElement | null = null
+      
+      buttons.forEach(btn => {
+        if (btn.textContent?.includes('Configurar Alertas')) {
+          foundButton = btn
+        }
+      })
+      
+      if (foundButton) {
+        // Adicionar listener direto no DOM (fallback caso o onClick do React não funcione)
+        const directHandler = (e: Event) => {
+          e.preventDefault()
+          e.stopPropagation()
+          handleOpenAlertConfig()
+        }
+        
+        foundButton.addEventListener('click', directHandler, true) // useCapture = true
+        
+        return () => {
+          foundButton?.removeEventListener('click', directHandler, true)
+        }
+      }
+    }
+    
+    // Verificar após um pequeno delay para garantir que o DOM foi renderizado
+    const timeout = setTimeout(checkButton, 1000)
+    
+    return () => clearTimeout(timeout)
+  }, [])
+
   // Generate smart meters based on network sensors
   const [smartMeters] = useState(() => generateSmartMeters(mockSensors))
 
   // Carregar dados iniciais (apenas uma vez)
   useEffect(() => {
     const loadInitialData = async () => {
+      console.log("[MonitoringPage] Iniciando carregamento de dados iniciais", {
+        timestamp: new Date().toISOString()
+      })
       try {
         const [hist, an] = await Promise.all([
           monitoringDev.getHistory({ sensor_id: "PRESS_001", limit: 50 }),
@@ -139,32 +335,198 @@ export function MonitoringPage() {
             created_at: a.created_at,
           })) ?? []
         })
-        console.log("✅ Monitoring: Dados iniciais carregados")
+        console.log("[MonitoringPage] Dados iniciais carregados com sucesso", {
+          readingsCount: series.length,
+          anomaliesCount: an.data?.length || 0,
+          timestamp: new Date().toISOString()
+        })
       } catch (error) {
-        console.log("❌ Monitoring: Erro ao carregar dados iniciais:", error)
+        console.error("[MonitoringPage] Erro ao carregar dados iniciais", {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          timestamp: new Date().toISOString()
+        })
       }
     }
     loadInitialData()
   }, [])
 
+  // Carregar limiares quando abrir o modal
+  const loadThresholds = async () => {
+    console.log("[MonitoringPage] Carregando limiares de alerta", {
+      timestamp: new Date().toISOString()
+    })
+    setIsLoadingThresholds(true)
+    try {
+      const sensorTypes = ['pressure', 'flow', 'water_quality', 'precipitation', 'river_level']
+      const thresholdsData: Record<string, { min: number; max: number; deviation_factor: number }> = {}
+      const errors: string[] = []
+      
+      for (const type of sensorTypes) {
+        try {
+          console.log("[MonitoringPage] Carregando limiares para tipo", { sensorType: type })
+          const response = await monitoringDev.getThresholds(type)
+          thresholdsData[type] = response.data
+          console.log("[MonitoringPage] Limiares carregados com sucesso", {
+            sensorType: type,
+            thresholds: response.data
+          })
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error)
+          errors.push(`${type}: ${errorMsg}`)
+          console.error("[MonitoringPage] Erro ao carregar limiares para tipo", {
+            sensorType: type,
+            error: errorMsg,
+            stack: error instanceof Error ? error.stack : undefined,
+            timestamp: new Date().toISOString()
+          })
+        }
+      }
+      
+      if (errors.length > 0) {
+        console.warn("[MonitoringPage] Alguns limiares não foram carregados", {
+          errors,
+          loadedTypes: Object.keys(thresholdsData),
+          timestamp: new Date().toISOString()
+        })
+      }
+      
+      setThresholds(thresholdsData)
+      setEditingThresholds(thresholdsData)
+      console.log("[MonitoringPage] Limiares carregados com sucesso", {
+        totalTypes: Object.keys(thresholdsData).length,
+        timestamp: new Date().toISOString()
+      })
+    } catch (error) {
+      console.error("[MonitoringPage] Erro crítico ao carregar limiares", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      })
+      alert("Erro ao carregar configurações de alerta. Tente novamente.")
+    } finally {
+      setIsLoadingThresholds(false)
+    }
+  }
+
+  // Salvar limiares
+  const saveThresholds = async () => {
+    console.log("[MonitoringPage] Iniciando salvamento de limiares", {
+      thresholds: editingThresholds,
+      timestamp: new Date().toISOString()
+    })
+    setIsSavingThresholds(true)
+    try {
+      const savedTypes: string[] = []
+      const failedTypes: Array<{ type: string; error: string }> = []
+      
+      for (const [sensorType, values] of Object.entries(editingThresholds)) {
+        const thresholdValues = values as { min: number; max: number }
+        if (thresholdValues.min >= thresholdValues.max) {
+          const errorMsg = `Valor mínimo (${thresholdValues.min}) deve ser menor que máximo (${thresholdValues.max})`
+          console.error("[MonitoringPage] Validação de limiares falhou", {
+            sensorType,
+            min: thresholdValues.min,
+            max: thresholdValues.max,
+            error: errorMsg,
+            timestamp: new Date().toISOString()
+          })
+          alert(`Erro: O valor mínimo deve ser menor que o máximo para ${translateSensorType(sensorType)}`)
+          setIsSavingThresholds(false)
+          return
+        }
+        
+        try {
+          console.log("[MonitoringPage] Salvando limiares para tipo", {
+            sensorType,
+            min: thresholdValues.min,
+            max: thresholdValues.max
+          })
+          await monitoringDev.updateThresholds(sensorType, thresholdValues.min, thresholdValues.max)
+          savedTypes.push(sensorType)
+          console.log("[MonitoringPage] Limiares salvos com sucesso", {
+            sensorType,
+            timestamp: new Date().toISOString()
+          })
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error)
+          failedTypes.push({ type: sensorType, error: errorMsg })
+          console.error("[MonitoringPage] Erro ao salvar limiares para tipo", {
+            sensorType,
+            min: thresholdValues.min,
+            max: thresholdValues.max,
+            error: errorMsg,
+            stack: error instanceof Error ? error.stack : undefined,
+            timestamp: new Date().toISOString()
+          })
+          alert(`Erro ao salvar limiares para ${translateSensorType(sensorType)}. Tente novamente.`)
+          setIsSavingThresholds(false)
+          return
+        }
+      }
+      
+      console.log("[MonitoringPage] Todos os limiares salvos com sucesso", {
+        savedTypes,
+        total: savedTypes.length,
+        timestamp: new Date().toISOString()
+      })
+      
+      // Recarregar limiares atualizados
+      await loadThresholds()
+      alert("Limiares de alerta atualizados com sucesso!")
+      setShowAlertConfigModal(false)
+    } catch (error) {
+      console.error("[MonitoringPage] Erro crítico ao salvar limiares", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      })
+      alert("Erro ao salvar configurações. Tente novamente.")
+    } finally {
+      setIsSavingThresholds(false)
+    }
+  }
+
+  // Abrir modal de configuração
+  const handleOpenAlertConfig = () => {
+    setShowAlertConfigModal(true)
+    loadThresholds()
+  }
+
   // Processar dados do WebSocket em tempo real
   useEffect(() => {
     if (lastMessage && lastMessage.type === "sensor_reading") {
       const reading = lastMessage.data
-      console.log("📡 WebSocket: Nova leitura recebida!", reading)
+      console.log("[MonitoringPage] Processando nova leitura do WebSocket", {
+        sensorId: reading?.sensor_id,
+        value: reading?.value,
+        timestamp: reading?.timestamp,
+        receivedAt: new Date().toISOString()
+      })
 
       // Atualizar gráfico em tempo real
-      setRealtimeData(prev => {
+      setRealtimeData((prev: Array<{ value: number; timestamp: string }>) => {
         const newData = [...prev, { value: Number(reading.value), timestamp: reading.timestamp }]
         // Manter apenas as últimas 50 leituras
-        return newData.slice(-50)
+        const trimmed = newData.slice(-50)
+        console.log("[MonitoringPage] Gráfico atualizado", {
+          previousCount: prev.length,
+          newCount: trimmed.length,
+          removedCount: newData.length - trimmed.length
+        })
+        return trimmed
       })
     }
 
     if (lastMessage && lastMessage.type === "anomaly_detected") {
-      console.log("⚠️ WebSocket: Nova anomalia detectada!", lastMessage.data)
+      console.log("[MonitoringPage] Nova anomalia detectada via WebSocket", {
+        sensorId: lastMessage.data?.sensor_id,
+        severity: lastMessage.data?.severity,
+        description: lastMessage.data?.description,
+        timestamp: new Date().toISOString()
+      })
       // Adicionar anomalia à lista
-      setAnomalies(prev => ({
+      setAnomalies((prev: { data: Anomaly[] }) => ({
         data: [lastMessage.data, ...prev.data]
       }))
     }
@@ -202,7 +564,7 @@ export function MonitoringPage() {
   }
 
   // Função para submeter observação (RF004)
-  const handleSubmitObservation = async (e: React.FormEvent) => {
+  const handleSubmitObservation = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!selectedReading) return
@@ -291,7 +653,8 @@ export function MonitoringPage() {
       water_quality: "Qualidade da Água",
       river_level: "Nível do Rio"
     }
-    return typeMap[type.toLowerCase()] || type.charAt(0).toUpperCase() + type.slice(1)
+    const normalizedType = type.toLowerCase().replace(/-/g, '_')
+    return typeMap[normalizedType] || type.charAt(0).toUpperCase() + type.slice(1)
   }
 
   const translateStatus = (status: string): string => {
@@ -356,6 +719,84 @@ export function MonitoringPage() {
     )
   }
 
+  // Função para formatar tempo
+  const formatUptime = (seconds: number | null): string => {
+    if (!seconds) return "0s"
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    if (hours > 0) return `${hours}h ${minutes}m ${secs}s`
+    if (minutes > 0) return `${minutes}m ${secs}s`
+    return `${secs}s`
+  }
+
+  // Função para formatar tempo desde última mensagem
+  const getTimeSinceLastMessage = (): string => {
+    if (!lastMessageTime) return "Nunca"
+    const seconds = Math.floor((Date.now() - lastMessageTime.getTime()) / 1000)
+    if (seconds < 60) return `${seconds}s atrás`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}min atrás`
+    const hours = Math.floor(minutes / 60)
+    return `${hours}h ${minutes % 60}min atrás`
+  }
+
+  // Função para obter cor do status de conexão WebSocket
+  const getConnectionStatusColor = (status: string) => {
+    switch (status) {
+      case 'connected': return 'text-green-600 bg-green-50 border-green-200'
+      case 'connecting': return 'text-yellow-600 bg-yellow-50 border-yellow-200'
+      case 'reconnecting': return 'text-orange-600 bg-orange-50 border-orange-200'
+      case 'disconnected': return 'text-red-600 bg-red-50 border-red-200'
+      default: return 'text-gray-600 bg-gray-50 border-gray-200'
+    }
+  }
+
+  // Função para obter ícone do status
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'connected': return <CheckCircle2 className="w-4 h-4" />
+      case 'connecting': return <Clock className="w-4 h-4 animate-spin" />
+      case 'reconnecting': return <AlertCircle className="w-4 h-4 animate-pulse" />
+      case 'disconnected': return <WifiOff className="w-4 h-4" />
+      default: return <WifiOff className="w-4 h-4" />
+    }
+  }
+
+  // Função para obter texto do status
+  const getStatusText = (status: string) => {
+    let text = ''
+    
+    switch (status) {
+      case 'connected': 
+        text = 'Conectado'
+        break
+      case 'connecting': 
+        text = 'Conectando...'
+        break
+      case 'reconnecting': 
+        text = reconnectCount > 0 ? `Reconectando... (${reconnectCount})` : 'Reconectando...'
+        break
+      case 'disconnected': 
+        text = reconnectCount > 0 ? `Desconectado (tentativa ${reconnectCount})` : 'Desconectado'
+        break
+      default: 
+        text = 'Desconhecido'
+    }
+    
+    // Debug: log para verificar valores
+    if (status === 'reconnecting' || reconnectCount > 0) {
+      console.log("[MonitoringPage] getStatusText retornando", {
+        status,
+        reconnectCount,
+        text,
+        timestamp: new Date().toISOString()
+      })
+    }
+    
+    return text
+  }
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -366,6 +807,93 @@ export function MonitoringPage() {
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* Botão de Configuração de Alertas */}
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleOpenAlertConfig()
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
+            title="Configurar Limiares de Alerta"
+            type="button"
+          >
+            <Bell className="w-4 h-4" />
+            <span className="text-sm font-medium">Configurar Alertas</span>
+          </button>
+
+          {/* Indicador de Status WebSocket */}
+          <div 
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${getConnectionStatusColor(connectionStatus)}`} 
+            key={`status-${connectionStatus}-${reconnectCount}`}
+            data-status={connectionStatus}
+            data-reconnect-count={reconnectCount}
+          >
+            {(() => {
+              const icon = getStatusIcon(connectionStatus)
+              console.log("[MonitoringPage] Renderizando ícone:", connectionStatus)
+              return icon
+            })()}
+            <div className="flex flex-col">
+              <span 
+                key={`status-text-${connectionStatus}-${reconnectCount}-${statusKey}`}
+                className="text-xs font-semibold" 
+                data-testid="status-text"
+                data-status={connectionStatus}
+                data-reconnect-count={reconnectCount}
+              >
+                {(() => {
+                  let displayText = ''
+                  if (connectionStatus === 'connected') {
+                    displayText = 'Conectado'
+                  } else if (connectionStatus === 'connecting') {
+                    displayText = 'Conectando...'
+                  } else if (connectionStatus === 'reconnecting') {
+                    displayText = reconnectCount > 0 ? `Reconectando... (${reconnectCount})` : 'Reconectando...'
+                  } else if (connectionStatus === 'disconnected') {
+                    displayText = reconnectCount > 0 ? `Desconectado (tentativa ${reconnectCount})` : 'Desconectado'
+                  } else {
+                    displayText = 'Desconhecido'
+                  }
+                  
+                  console.log("[MonitoringPage] Renderizando texto no span:", {
+                    displayText,
+                    connectionStatus,
+                    reconnectCount,
+                    timestamp: new Date().toISOString(),
+                    elementKey: `text-${connectionStatus}-${reconnectCount}`,
+                    spanKey: `status-text-${connectionStatus}-${reconnectCount}-${statusKey}`
+                  })
+                  
+                  return displayText
+                })()}
+              </span>
+              {connectionStatus === 'connected' && (
+                <div className="flex items-center gap-3 text-xs mt-1">
+                  {latency !== null && (
+                    <span className="text-gray-600">
+                      Latência: <span className="font-medium">{latency}ms</span>
+                    </span>
+                  )}
+                  {connectionUptime !== null && (
+                    <span className="text-gray-600">
+                      Uptime: <span className="font-medium">{formatUptime(connectionUptime)}</span>
+                    </span>
+                  )}
+                  {lastMessageTime && (
+                    <span className="text-gray-600">
+                      Última msg: <span className="font-medium">{getTimeSinceLastMessage()}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+              {(connectionStatus === 'reconnecting' || (reconnectCount > 0 && connectionStatus !== 'connected')) && (
+                <span className="text-xs text-gray-600 mt-1">
+                  Tentativas: {reconnectCount}
+                </span>
+              )}
+            </div>
+          </div>
           {/* View Mode Toggle */}
           <div className="flex items-center bg-gray-100 rounded-lg p-1">
             <button
@@ -392,7 +920,7 @@ export function MonitoringPage() {
 
           <select
             value={selectedSensorType}
-            onChange={(e) => setSelectedSensorType(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedSensorType(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {sensorTypes.map((type) => (
@@ -492,10 +1020,10 @@ export function MonitoringPage() {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={realtimeData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="timestamp" tickFormatter={(value) => new Date(value).toLocaleTimeString()} />
+              <XAxis dataKey="timestamp" tickFormatter={(value: string) => new Date(value).toLocaleTimeString()} />
               <YAxis domain={[2, 5]} />
               <Tooltip
-                labelFormatter={(value) => new Date(value).toLocaleString()}
+                labelFormatter={(value: string) => new Date(value).toLocaleString()}
                 formatter={(value: number) => [`${value.toFixed(2)} bar`, "Pressão"]}
               />
               <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={2} dot={false} />
@@ -511,9 +1039,33 @@ export function MonitoringPage() {
             <h3 className="text-lg font-semibold text-gray-900">Mapa Digital Twin - Rede de Abastecimento</h3>
             <p className="text-sm text-gray-600">Visualização em tempo real dos sensores na rede</p>
           </div>
-          <div className="h-[600px]">
-            <DigitalTwinMap sensors={filteredSensors} smartMeters={smartMeters} />
-          </div>
+          {!filteredSensors || filteredSensors.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[600px] text-center px-6">
+              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                <Inbox className="w-10 h-10 text-gray-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                Nenhum sensor para exibir no mapa
+              </h3>
+              <p className="text-sm text-gray-600 mb-4 max-w-md">
+                Configure sensores com localização (latitude e longitude) para visualizá-los no mapa de monitoramento.
+              </p>
+              <button
+                onClick={() => {
+                  // TODO: Implementar navegação para página de configuração de sensores
+                  alert("Funcionalidade de configuração de sensores será implementada em breve.")
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Configurar Sensores</span>
+              </button>
+            </div>
+          ) : (
+            <div className="h-[600px]">
+              <DigitalTwinMap sensors={filteredSensors} smartMeters={smartMeters} />
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -522,28 +1074,52 @@ export function MonitoringPage() {
             <div className="px-6 py-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900">Sensores Ativos</h3>
             </div>
-            <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-              {sensors?.data?.map((sensor: SensorReading) => (
-                <div key={sensor.id} className="px-6 py-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {translateSensorType(sensor.sensor_type)} - {sensor.sensor_id}
-                      </p>
-                      <p className="text-sm text-gray-600">{sensor.location}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-gray-900">
-                        {sensor.value} {sensor.unit}
-                      </p>
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(sensor.status)}`}>
-                        {translateStatus(sensor.status)}
-                      </span>
+            {!sensors?.data || sensors.data.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                  <Inbox className="w-8 h-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Nenhum sensor configurado
+                </h3>
+                <p className="text-sm text-gray-600 mb-4 max-w-sm">
+                  Não há sensores configurados no sistema no momento. Configure sensores para começar a monitorar a rede de abastecimento.
+                </p>
+                <button
+                  onClick={() => {
+                    // TODO: Implementar navegação para página de configuração de sensores
+                    alert("Funcionalidade de configuração de sensores será implementada em breve.")
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Configurar Sensores</span>
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+                {sensors?.data?.map((sensor: SensorReading) => (
+                  <div key={sensor.id} className="px-6 py-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {translateSensorType(sensor.sensor_type)} - {sensor.sensor_id}
+                        </p>
+                        <p className="text-sm text-gray-600">{sensor.location}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium text-gray-900">
+                          {sensor.value} {sensor.unit}
+                        </p>
+                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(sensor.status)}`}>
+                          {translateStatus(sensor.status)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Anomalies */}
@@ -552,7 +1128,20 @@ export function MonitoringPage() {
               <h3 className="text-lg font-semibold text-gray-900">Anomalias Pendentes</h3>
             </div>
             <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-              {anomalies?.data?.map((anomaly: Anomaly) => (
+              {!anomalies?.data || anomalies.data.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                    <CheckCircle2 className="w-8 h-8 text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    Nenhuma anomalia pendente
+                  </h3>
+                  <p className="text-sm text-gray-600 max-w-sm">
+                    Ótimo! Todos os sensores estão operando normalmente.
+                  </p>
+                </div>
+              ) : (
+                anomalies?.data?.map((anomaly: Anomaly) => (
                 <div key={anomaly.id} className="px-6 py-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
@@ -581,7 +1170,8 @@ export function MonitoringPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </div>
         </div>
@@ -617,7 +1207,7 @@ export function MonitoringPage() {
               </label>
               <select
                 value={observationType}
-                onChange={(e) => setObservationType(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setObservationType(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="general">Geral</option>
@@ -633,7 +1223,7 @@ export function MonitoringPage() {
               </label>
               <textarea
                 value={observationText}
-                onChange={(e) => setObservationText(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setObservationText(e.target.value)}
                 rows={5}
                 minLength={10}
                 maxLength={500}
@@ -670,6 +1260,127 @@ export function MonitoringPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Modal de Configuração de Alertas */}
+      {showAlertConfigModal && (
+        <Modal
+          isOpen={showAlertConfigModal}
+          onClose={() => {
+            setShowAlertConfigModal(false)
+            setEditingThresholds({})
+          }}
+          title="Configurar Limiares de Alerta"
+        >
+          <div className="space-y-6">
+            {isLoadingThresholds ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3 text-gray-600">Carregando configurações...</span>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600">
+                  Configure os limiares mínimo e máximo para cada tipo de sensor. Valores fora desses limites serão considerados anomalias.
+                </p>
+
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {['pressure', 'flow', 'water_quality', 'precipitation', 'river_level'].map((sensorType) => {
+                    const current = editingThresholds[sensorType] || thresholds[sensorType] || { min: 0, max: 100 }
+                    const deviationFactor = thresholds[sensorType]?.deviation_factor || 2.0
+
+                    return (
+                      <div key={sensorType} className="border border-gray-200 rounded-lg p-4">
+                        <h4 className="font-semibold text-gray-900 mb-3">
+                          {translateSensorType(sensorType)}
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Limiar Mínimo
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={current.min}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                const newValue = parseFloat(e.target.value) || 0
+                                setEditingThresholds({
+                                  ...editingThresholds,
+                                  [sensorType]: { ...current, min: newValue }
+                                })
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Limiar Máximo
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={current.max}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                const newValue = parseFloat(e.target.value) || 0
+                                setEditingThresholds({
+                                  ...editingThresholds,
+                                  [sensorType]: { ...current, max: newValue }
+                                })
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500">
+                          Fator de desvio: {deviationFactor.toFixed(1)} (usado para detecção estatística)
+                        </div>
+                        {current.min >= current.max && (
+                          <div className="mt-2 text-xs text-red-600">
+                            ⚠️ O valor mínimo deve ser menor que o máximo
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAlertConfigModal(false)
+                      setEditingThresholds({})
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                    disabled={isSavingThresholds}
+                  >
+                    <X className="w-4 h-4" />
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveThresholds}
+                    disabled={isSavingThresholds}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    {isSavingThresholds ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Salvando...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        Salvar Configurações
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </Modal>
       )}
     </div>

@@ -1,5 +1,3 @@
-"use client"
-
 import React, { useState, useEffect, useRef } from 'react'
 import { MessageSquare, X, Send, Bot, User, Loader2, Wifi, WifiOff } from 'lucide-react'
 import { api } from '../services/api'

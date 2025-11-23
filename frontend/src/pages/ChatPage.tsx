@@ -1,5 +1,3 @@
-"use client"
-
 import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Bot, User, Send, Loader2, MessageSquare, Ticket, Search, X, Wifi, WifiOff } from 'lucide-react'
