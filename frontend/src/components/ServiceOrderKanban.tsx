@@ -63,24 +63,47 @@ const COLUMNS: KanbanColumn[] = [
 export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanProps) {
   const queryClient = useQueryClient()
   const [draggedOrder, setDraggedOrder] = useState<WorkOrder | null>(null)
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
 
   const updateOrderMutation = useMutation({
     mutationFn: ({ orderId, status }: { orderId: number; status: WorkOrder["status"] }) =>
       maintenanceDev.updateWorkOrder(orderId, { status }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["work-orders"] })
+      queryClient.invalidateQueries({ queryKey: ['workOrders'] })
     }
   })
 
-  const handleDragStart = (order: WorkOrder) => {
+  const handleDragStart = (e: React.DragEvent, order: WorkOrder) => {
     setDraggedOrder(order)
+    e.dataTransfer.effectAllowed = "move"
+    // Adiciona uma classe para feedback visual
+    const target = e.currentTarget as HTMLElement
+    target.style.opacity = "0.5"
+  }
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement
+    target.style.opacity = "1"
+    setDraggedOrder(null)
+    setDragOverColumn(null)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
   }
 
-  const handleDrop = (status: WorkOrder["status"]) => {
+  const handleDragEnter = (columnId: string) => {
+    setDragOverColumn(columnId)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverColumn(null)
+  }
+
+  const handleDrop = (e: React.DragEvent, status: WorkOrder["status"]) => {
+    e.preventDefault()
+    
     if (draggedOrder && draggedOrder.status !== status) {
       updateOrderMutation.mutate({
         orderId: parseInt(draggedOrder.id),
@@ -88,6 +111,7 @@ export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanP
       })
     }
     setDraggedOrder(null)
+    setDragOverColumn(null)
   }
 
   const getPriorityConfig = (priority: string) => {
@@ -154,9 +178,13 @@ export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanP
         return (
           <div
             key={column.id}
-            className={`flex flex-col rounded-lg border-2 ${colorConfig.border} ${colorConfig.bg} overflow-hidden`}
+            className={`flex flex-col rounded-lg border-2 ${colorConfig.border} ${colorConfig.bg} overflow-hidden transition-all duration-200 ${
+              dragOverColumn === column.id ? 'ring-4 ring-blue-400 ring-opacity-50 scale-[1.02]' : ''
+            }`}
             onDragOver={handleDragOver}
-            onDrop={() => handleDrop(column.status)}
+            onDragEnter={() => handleDragEnter(column.id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, column.status)}
           >
             {/* Column Header */}
             <div className={`${colorConfig.header} text-white px-4 py-3 flex items-center justify-between shadow-md`}>
@@ -184,9 +212,12 @@ export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanP
                     <div
                       key={order.id}
                       draggable
-                      onDragStart={() => handleDragStart(order)}
+                      onDragStart={(e) => handleDragStart(e, order)}
+                      onDragEnd={handleDragEnd}
                       onClick={() => onOrderClick(order)}
-                      className={`bg-white rounded-lg border-2 ${priorityConfig.color} p-4 cursor-move hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1`}
+                      className={`bg-white rounded-lg border-2 ${priorityConfig.color} p-4 cursor-move hover:shadow-xl transition-all duration-200 transform hover:-translate-y-1 ${
+                        draggedOrder?.id === order.id ? 'opacity-50 rotate-2 scale-95' : ''
+                      }`}
                     >
                       {/* Priority Badge */}
                       <div className="flex items-center justify-between mb-3">
