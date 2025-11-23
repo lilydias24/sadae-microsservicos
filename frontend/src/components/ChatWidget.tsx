@@ -300,9 +300,9 @@ export function ChatWidget({ initialTicketId }: ChatWidgetProps) {
                   {currentTicketId && (
                     <>
                       {wsConnected ? (
-                        <Wifi className="w-3 h-3 text-green-300" title="Conectado" />
+                        <Wifi className="w-3 h-3 text-green-300" aria-label="Conectado" />
                       ) : (
-                        <WifiOff className="w-3 h-3 text-yellow-300" title="Desconectado" />
+                        <WifiOff className="w-3 h-3 text-yellow-300" aria-label="Desconectado" />
                       )}
                     </>
                   )}

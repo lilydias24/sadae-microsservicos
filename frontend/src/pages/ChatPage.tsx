@@ -626,9 +626,9 @@ Quer simular o valor da sua próxima fatura?`
                 {currentTicketId && (
                   <>
                     {wsConnected ? (
-                      <Wifi className="w-3 h-3 text-green-500" title="Conectado" />
+                      <Wifi className="w-3 h-3 text-green-500" aria-label="Conectado" />
                     ) : (
-                      <WifiOff className="w-3 h-3 text-yellow-500" title="Desconectado" />
+                      <WifiOff className="w-3 h-3 text-yellow-500" aria-label="Desconectado" />
                     )}
                   </>
                 )}

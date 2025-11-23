@@ -7,6 +7,7 @@ import { Layout } from "./components/Layout"
 
 // Pages
 import { LoginPage } from "./pages/LoginPage"
+import { ResetPasswordPage } from "./pages/ResetPasswordPage"
 import { DashboardPage } from "./pages/DashboardPage"
 import { BillingPage } from "./pages/BillingPage"
 import { MaintenancePage } from "./pages/MaintenancePage"
@@ -38,6 +39,8 @@ function App() {
               <Routes>
                 {/* Public routes */}
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/forgot-password" element={<ResetPasswordPage />} />
+                <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
 
                 {/* Protected routes */}
                 <Route

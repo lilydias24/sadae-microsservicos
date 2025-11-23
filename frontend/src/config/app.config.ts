@@ -2,16 +2,16 @@
 export const appConfig = {
   // Set to true to use real API data, false to use mock data
   useRealData: true, // Change to true when ready to use real backend data
-  
+
   // API endpoints
   apiEndpoints: {
     auth: "/auth",
-    billing: "/billing", 
+    billing: "/billing",
     monitoring: "/monitoring",
     maintenance: "/maintenance",
     support: "/support"
   },
-  
+
   // Mock data fallback
   useMockFallback: true, // If real API fails, fallback to mock data
 }

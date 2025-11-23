@@ -39,7 +39,13 @@ export const LoginPage: React.FC = () => {
       await login(username, password)
       navigate("/dashboard")
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Erro ao fazer login")
+      console.log("Erro completo:", err)
+      console.log("Erro response:", err.response)
+      console.log("Erro response data:", err.response?.data)
+      console.log("Erro response data detail:", err.response?.data?.detail)
+      
+      const errorMessage = err.response?.data?.detail || err.message || "Erro ao fazer login"
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -170,6 +176,15 @@ export const LoginPage: React.FC = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
+              </div>
+
+              <div className="flex items-center justify-end">
+                <Link
+                  to="/forgot-password"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Esqueci minha senha
+                </Link>
               </div>
 
               <button

@@ -422,6 +422,7 @@ class Observation(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     sensor_id = Column(String, ForeignKey("sensors.id"), nullable=False)
+    reading_id = Column(Integer, nullable=True)  # Optional link to specific sensor reading
     operator_id = Column(Integer, nullable=False)
     operator_name = Column(String(100), nullable=True)
     text = Column(Text, nullable=False)

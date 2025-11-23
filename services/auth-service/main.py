@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime
 import sys
 import os
+import secrets
 
 # Add shared modules to path
 sys.path.append('/app/shared')
@@ -13,8 +14,8 @@ from models import UserRole
 from database import get_database_url, create_database_engine, get_session_local, get_db
 from auth import verify_password, get_password_hash, create_access_token, verify_token
 
-from database_models import User, Base
-from schemas import UserCreate, UserLogin, UserResponse, Token, UserUpdate
+from database_models import User, Base, PasswordResetToken
+from schemas import UserCreate, UserLogin, UserResponse, Token, UserUpdate, ForgotPasswordRequest, ResetPasswordRequest, VerifyResetTokenRequest, MessageResponse
 
 app = FastAPI(
     title="SADAE Authentication Service",
@@ -128,16 +129,22 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db_sessio
     # Find user by email
     user = db.query(User).filter(User.email == user_credentials.email).first()
     
-    if not user or not verify_password(user_credentials.password, user.hashed_password):
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Email não encontrado"
+        )
+    
+    if not verify_password(user_credentials.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Senha incorreta"
         )
     
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Inactive user"
+            detail="Usuário inativo. Entre em contato com o suporte."
         )
     
     # Create access token
@@ -278,6 +285,129 @@ async def verify_user_token(
             "is_active": user.is_active
         }
     }
+
+@app.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    db: Session = Depends(get_db_session)
+):
+    """Request password reset - sends reset token (simplified version without email)"""
+    
+    # Find user by email
+    user = db.query(User).filter(User.email == request.email).first()
+    
+    # Always return success to prevent email enumeration
+    if not user:
+        return {"message": "Se o email existir, um link de redefinição será enviado"}
+    
+    # Generate secure reset token
+    reset_token = secrets.token_urlsafe(6)
+    
+    # Set expiration to 1 hour from now
+    expires_at = datetime.utcnow() + timedelta(hours=1)
+    
+    # Invalidate any existing tokens for this user
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used == False
+    ).update({"used": True})
+    
+    # Create new reset token
+    db_token = PasswordResetToken(
+        user_id=user.id,
+        token=reset_token,
+        expires_at=expires_at,
+        used=False
+    )
+    
+    db.add(db_token)
+    db.commit()
+    
+    # In production, you would send an email here
+    # For now, we'll log the token (in production, remove this!)
+    print(f"Password reset token for {user.email}: {reset_token}")
+    print(f"Reset URL: http://localhost:3000/reset-password/{reset_token}")
+    
+    return {"message": "Se o email existir, um link de redefinição será enviado"}
+
+@app.post("/verify-reset-token", response_model=MessageResponse)
+async def verify_reset_token(
+    request: VerifyResetTokenRequest,
+    db: Session = Depends(get_db_session)
+):
+    """Verify if reset token is valid"""
+    
+    # Find token in database
+    db_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == request.token,
+        PasswordResetToken.used == False
+    ).first()
+    
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido ou já utilizado"
+        )
+    
+    # Check if token is expired
+    if datetime.utcnow() > db_token.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token expirado"
+        )
+    
+    return {"message": "Token válido"}
+
+@app.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db_session)
+):
+    """Reset user password with valid token"""
+    
+    # Find token in database
+    db_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == request.token,
+        PasswordResetToken.used == False
+    ).first()
+    
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido ou já utilizado"
+        )
+    
+    # Check if token is expired
+    if datetime.utcnow() > db_token.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token expirado"
+        )
+    
+    # Validate password length
+    if len(request.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A senha deve ter pelo menos 6 caracteres"
+        )
+    
+    # Find user
+    user = db.query(User).filter(User.id == db_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado"
+        )
+    
+    # Update password
+    user.hashed_password = get_password_hash(request.new_password)
+    
+    # Mark token as used
+    db_token.used = True
+    
+    db.commit()
+    
+    return {"message": "Senha redefinida com sucesso"}
 
 if __name__ == "__main__":
     import uvicorn
