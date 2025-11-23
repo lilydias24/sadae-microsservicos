@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { maintenanceDev } from "../services/maintenanceService"
 import { useAuth } from "../contexts/AuthContext"
+import { ServiceOrderKanban } from "../components/ServiceOrderKanban"
+import { LayoutGrid, List } from "lucide-react"
 
 interface WorkOrder {
   id: string
@@ -42,6 +44,7 @@ export function MaintenancePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints" | "chat">("orders")
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("kanban")
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null)
   const [showCreateOrder, setShowCreateOrder] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -494,60 +497,90 @@ export function MaintenancePage() {
 
       {/* Content */}
       {activeTab === "orders" && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
+        <div className="space-y-4">
+          {/* View Toggle */}
+          <div className="flex justify-between items-center bg-white rounded-lg shadow px-6 py-3">
             <h3 className="text-lg font-semibold text-gray-900">Ordens de Serviço</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  viewMode === "list"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <List className="w-4 h-4" />
+                Lista
+              </button>
+              <button
+                onClick={() => setViewMode("kanban")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  viewMode === "kanban"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                Kanban
+              </button>
+            </div>
           </div>
-          <div className="divide-y divide-gray-200">
-            {loadingOrders ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                Carregando ordens de serviço...
-              </div>
-            ) : workOrders.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                Nenhuma ordem de serviço encontrada.
-              </div>
-            ) : (
-              workOrders.map((order: WorkOrder) => (
-                <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3">
-                        <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
-                        >
-                          {priorityDisplayMapping[order.priority as keyof typeof priorityDisplayMapping] || order.priority}
-                        </span>
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
-                        >
-                          {statusDisplayMapping[order.status as keyof typeof statusDisplayMapping] || order.status}
-                        </span>
+
+          {loadingOrders ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              Carregando ordens de serviço...
+            </div>
+          ) : workOrders.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              Nenhuma ordem de serviço encontrada.
+            </div>
+          ) : viewMode === "kanban" ? (
+            <ServiceOrderKanban orders={workOrders} onOrderClick={openOrderDetail} />
+          ) : (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="divide-y divide-gray-200">
+                {workOrders.map((order: WorkOrder) => (
+                  <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3">
+                          <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
+                          >
+                            {priorityDisplayMapping[order.priority as keyof typeof priorityDisplayMapping] || order.priority}
+                          </span>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
+                          >
+                            {statusDisplayMapping[order.status as keyof typeof statusDisplayMapping] || order.status}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">{order.description}</p>
+                        <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                          <span>📍 {order.location}</span>
+                          <span>⏱️ {order.estimated_duration}h</span>
+                          <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
+                        </div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-1">{order.description}</p>
-                      <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                        <span>📍 {order.location}</span>
-                        <span>⏱️ {order.estimated_duration}h</span>
-                        <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
+                      <div className="flex items-center space-x-2">
+                        {order.status === "open" && (
+                          <button
+                            onClick={() => setSelectedOrder(order)}
+                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Atribuir Equipe
+                          </button>
+                        )}
+                        <button onClick={() => openOrderDetail(order)} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Ver Detalhes</button>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      {order.status === "open" && (
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Atribuir Equipe
-                        </button>
-                      )}
-                      <button onClick={() => openOrderDetail(order)} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Ver Detalhes</button>
                     </div>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

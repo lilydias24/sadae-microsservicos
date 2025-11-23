@@ -138,13 +138,13 @@ async def create_service_order(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Create service order (maintenance manager only)"""
+    """Create service order (maintenance manager and operator)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas gerentes de manutenção podem criar ordens de serviço"
+            detail="Apenas gerentes de manutenção e operadores podem criar ordens de serviço"
         )
     
     protocol_number = generate_protocol_number()
@@ -517,7 +517,7 @@ async def create_team(
     """Create maintenance team"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Check if team name already exists
@@ -552,7 +552,7 @@ async def update_team(
 ):
     """Update maintenance team"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     team = db.query(Team).filter(Team.id == team_id).first()
@@ -586,7 +586,7 @@ async def add_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
@@ -613,7 +613,7 @@ async def update_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     member = db.query(TeamMember).filter(TeamMember.id == member_id, TeamMember.team_id == team_id).first()
     if not member:
@@ -632,7 +632,7 @@ async def delete_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     member = db.query(TeamMember).filter(TeamMember.id == member_id, TeamMember.team_id == team_id).first()
     if not member:
