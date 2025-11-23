@@ -141,6 +141,9 @@ def verify_user_token(token: str) -> dict:
     
     Args:
         token: JWT token (without 'Bearer ' prefix) or full 'Bearer token' string
+    
+    Returns:
+        dict with keys: id, name, email, role
     """
     if not token:
         raise HTTPException(
@@ -152,14 +155,72 @@ def verify_user_token(token: str) -> dict:
     if token.startswith("Bearer "):
         token = token.split(" ", 1)[1]
     
-    user = verify_token(token)
-    return user
+    payload = verify_token(token)
+    
+    # Normalize user data from JWT payload
+    user_id = payload.get("sub") or payload.get("user_id") or payload.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido: ID do usuário não encontrado no payload"
+        )
+    
+    # Convert to int if it's a string (required for database)
+    if isinstance(user_id, str):
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token inválido: ID do usuário não é um número válido: {user_id}"
+            )
+    
+    return {
+        "id": int(user_id),  # Ensure it's always an int
+        "name": payload.get("name") or payload.get("username") or payload.get("full_name") or "Usuário",
+        "email": payload.get("email") or "",
+        "role": payload.get("role") or "citizen"
+    }
 
-def generate_ticket_number() -> str:
-    """Generate unique ticket number"""
-    timestamp = datetime.now().strftime("%Y%m%d")
-    unique_id = str(uuid.uuid4()).split('-')[0].upper()
-    return f"SUP-{timestamp}-{unique_id}"
+def generate_ticket_number(db: Session) -> str:
+    """Generate unique sequential ticket number in format TK001, TK002, etc."""
+    # Find all tickets with TK prefix to get the highest number
+    tickets_with_tk = db.query(SupportTicket).filter(
+        SupportTicket.ticket_number.like('TK%')
+    ).all()
+    
+    max_number = 0
+    
+    if tickets_with_tk:
+        for ticket in tickets_with_tk:
+            try:
+                # Extract number from formats like TK001, TK002, etc.
+                if ticket.ticket_number.startswith("TK"):
+                    # Remove "TK" prefix and convert to int
+                    number_str = ticket.ticket_number[2:].lstrip('0') or '0'
+                    number = int(number_str)
+                    max_number = max(max_number, number)
+            except (ValueError, AttributeError):
+                # Skip tickets with invalid format
+                continue
+    
+    # If no TK tickets found, check if there are any tickets at all
+    # and use the highest ID as fallback
+    if max_number == 0:
+        last_ticket = db.query(SupportTicket).order_by(SupportTicket.id.desc()).first()
+        if last_ticket:
+            # Use ticket ID as starting point
+            max_number = last_ticket.id
+    
+    # Get next number
+    next_number = max_number + 1
+    
+    # Format as TK001, TK002, etc. (padded to 3 digits minimum, can grow)
+    # For numbers > 999, it will be TK1000, TK1001, etc.
+    if next_number < 1000:
+        return f"TK{next_number:03d}"
+    else:
+        return f"TK{next_number}"
 
 def generate_slug(title: str) -> str:
     """Generate URL-friendly slug from title"""
@@ -188,39 +249,62 @@ async def create_ticket(
     db: Session = Depends(get_db)
 ):
     """Create new support ticket"""
-    user = verify_user_token(f"Bearer {credentials.credentials}")
-    
-    ticket = SupportTicket(
-        ticket_number=generate_ticket_number(),
-        title=ticket_data.title,
-        description=ticket_data.description,
-        category=ticket_data.category,
-        priority=ticket_data.priority,
-        client_id=user["id"],
-        client_name=user["name"],
-        client_email=user["email"],
-        client_phone=ticket_data.client_phone,
-        related_bill_id=ticket_data.related_bill_id,
-        related_order_id=ticket_data.related_order_id
-    )
-    
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-    
-    # Create initial system message
-    system_message = TicketMessage(
-        ticket_id=ticket.id,
-        message_type=MessageType.SYSTEM,
-        content=f"Ticket #{ticket.ticket_number} criado por {user['name']}",
-        author_user_id=user["id"],
-        author_name="Sistema",
-        is_internal=False
-    )
-    db.add(system_message)
-    db.commit()
-    
-    return ticket
+    try:
+        user = verify_user_token(f"Bearer {credentials.credentials}")
+        
+        print(f"🔍 Creating ticket for user: id={user['id']}, name={user['name']}, email={user['email']}")
+        print(f"📦 Ticket data: title={ticket_data.title[:50]}, category={ticket_data.category}, priority={ticket_data.priority}")
+        
+        # Generate ticket number (needs db session for sequential numbering)
+        ticket_number = generate_ticket_number(db)
+        print(f"🎫 Generated ticket number: {ticket_number}")
+        
+        ticket = SupportTicket(
+            ticket_number=ticket_number,
+            title=ticket_data.title,
+            description=ticket_data.description,
+            category=ticket_data.category,
+            priority=ticket_data.priority,
+            client_id=user["id"],
+            client_name=user["name"],
+            client_email=user["email"],
+            client_phone=ticket_data.client_phone,
+            related_bill_id=ticket_data.related_bill_id,
+            related_order_id=ticket_data.related_order_id
+        )
+        
+        db.add(ticket)
+        db.commit()
+        db.refresh(ticket)
+        
+        print(f"✅ Ticket created: {ticket.ticket_number} (ID: {ticket.id})")
+        
+        # Create initial system message
+        system_message = TicketMessage(
+            ticket_id=ticket.id,
+            message_type=MessageType.SYSTEM,
+            content=f"Ticket #{ticket.ticket_number} criado por {user['name']}",
+            author_user_id=user["id"],
+            author_name="Sistema",
+            is_internal=False
+        )
+        db.add(system_message)
+        db.commit()
+        
+        return ticket
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Error creating ticket: {e}")
+        print(f"❌ Traceback: {error_trace}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao criar ticket: {str(e)}"
+        )
 
 @router.get("/tickets", response_model=List[TicketResponse])
 async def get_tickets(
@@ -1257,8 +1341,11 @@ async def create_public_ticket(
     db: Session = Depends(get_db)
 ):
     """Create ticket without authentication (for public portal)"""
+    # Generate ticket number (needs db session for sequential numbering)
+    ticket_number = generate_ticket_number(db)
+    
     ticket = SupportTicket(
-        ticket_number=generate_ticket_number(),
+        ticket_number=ticket_number,
         title=ticket_data.title,
         description=ticket_data.description,
         category=ticket_data.category,

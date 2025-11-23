@@ -444,9 +444,31 @@ export function SupportPage() {
     e.preventDefault()
     try {
       setLoading(true)
-      console.log('📝 Criando ticket com dados:', newTicket)
       
-      const response = await api.post('/support/tickets', newTicket)
+      // Validação básica no frontend
+      if (!newTicket.title || newTicket.title.trim().length < 5) {
+        alert('O título deve ter pelo menos 5 caracteres')
+        setLoading(false)
+        return
+      }
+      
+      if (!newTicket.description || newTicket.description.trim().length < 10) {
+        alert('A descrição deve ter pelo menos 10 caracteres')
+        setLoading(false)
+        return
+      }
+      
+      // Preparar dados para envio
+      const ticketData = {
+        title: newTicket.title.trim(),
+        description: newTicket.description.trim(),
+        category: newTicket.category,
+        priority: newTicket.priority
+      }
+      
+      console.log('📝 Criando ticket com dados:', ticketData)
+      
+      const response = await api.post('/support/tickets', ticketData)
       console.log('✅ Ticket criado com sucesso:', response.data)
       
       // Normalizar o ticket criado para o formato esperado
@@ -499,8 +521,39 @@ export function SupportPage() {
         request: error.config
       })
       
-      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'Erro desconhecido'
-      alert(`Não foi possível criar o ticket: ${errorMessage}`)
+      // Extrair mensagem de erro de forma mais detalhada
+      let errorMessage = 'Erro desconhecido'
+      
+      if (error.response?.data) {
+        const errorData = error.response.data
+        
+        // FastAPI retorna erros de validação em formato específico
+        if (Array.isArray(errorData.detail)) {
+          // Erro de validação do FastAPI
+          const validationErrors = errorData.detail.map((err: any) => {
+            const field = err.loc?.join('.') || 'campo'
+            const msg = err.msg || 'erro de validação'
+            return `${field}: ${msg}`
+          }).join('\n')
+          errorMessage = `Erro de validação:\n${validationErrors}`
+        } else if (errorData.detail) {
+          errorMessage = typeof errorData.detail === 'string' 
+            ? errorData.detail 
+            : JSON.stringify(errorData.detail)
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+      
+      console.error('❌ Erro completo:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: errorMessage
+      })
+      
+      alert(`Não foi possível criar o ticket:\n${errorMessage}`)
     } finally {
       setLoading(false)
     }

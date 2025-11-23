@@ -139,7 +139,7 @@ class SupportTicket(Base):
     __tablename__ = "support_tickets"
     
     id = Column(Integer, primary_key=True, index=True)
-    ticket_number = Column(String(20), unique=True, index=True)
+    ticket_number = Column(String(30), unique=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     category = Column(String(50), nullable=False)  # billing, technical, complaint, request, information, emergency

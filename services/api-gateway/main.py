@@ -2,8 +2,10 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import httpx
 import os
 import sys
@@ -62,15 +64,87 @@ app.add_middleware(
 # Additional CORS middleware to ensure headers are always present
 class CORSHeaderMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
-        response = await call_next(request)
-        # Add CORS headers to all responses
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-        return response
+        try:
+            response = await call_next(request)
+            # Add CORS headers to all responses
+            response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            return response
+        except Exception as e:
+            # If an exception occurs, return a response with CORS headers
+            print(f"❌ CORSHeaderMiddleware caught exception: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                }
+            )
 
 app.add_middleware(CORSHeaderMiddleware)
+
+# Exception handlers to ensure CORS headers are always present
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTPException and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle StarletteHTTPException and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions and ensure CORS headers are present"""
+    print(f"❌ Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
 
 security = HTTPBearer()
 
@@ -677,21 +751,90 @@ async def get_support_tickets(credentials: HTTPAuthorizationCredentials = Depend
 @app.post("/support/tickets")
 async def create_support_ticket(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create support ticket"""
-    verify_token(credentials.credentials)
-    
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{service_registry.get_service_url('core')}/support/tickets",
-            content=body,
+    try:
+        verify_token(credentials.credentials)
+        
+        body = await request.body()
+        body_str = body.decode('utf-8') if body else '{}'
+        print(f"🔍 Proxying ticket creation to core service")
+        print(f"📦 Request body: {body_str[:200]}...")
+        
+        core_url = service_registry.get_service_url('core')
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{core_url}/support/tickets",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "Authorization": f"Bearer {credentials.credentials}"
+                }
+            )
+            
+            print(f"✅ Core service response: {response.status_code}")
+            
+            if response.status_code >= 400:
+                # Try to parse error details
+                try:
+                    error_data = response.json()
+                    error_detail = error_data
+                    print(f"❌ Core service error (JSON): {error_detail}")
+                except:
+                    error_detail = {"detail": response.text}
+                    print(f"❌ Core service error (text): {error_detail}")
+                
+                # Return error with CORS headers, preserving the original error structure
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content=error_detail if isinstance(error_detail, dict) else {"detail": str(error_detail)},
+                    headers={
+                        "Access-Control-Allow-Origin": "http://localhost:3000",
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                        "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                    }
+                )
+            
+            result = response.json() if response.text else {}
+            print(f"✅ Ticket created successfully: {result.get('id', 'unknown')}")
+            return add_cors_headers(result)
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to core service: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Core service unavailable: {e}"},
             headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {credentials.credentials}"
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
             }
         )
-        result = response.json() if response.text else {}
-        return add_cors_headers(result)
+    except httpx.TimeoutException as e:
+        print(f"❌ Timeout error: {e}")
+        return JSONResponse(
+            status_code=504,
+            content={"detail": f"Core service timeout: {e}"},
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
+            }
+        )
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal server error: {e}"},
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
+            }
+        )
 
 @app.get("/support/tickets/{ticket_id}")
 async def get_support_ticket(ticket_id: int, credentials: HTTPAuthorizationCredentials = Depends(security)):
