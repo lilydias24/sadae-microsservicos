@@ -67,7 +67,7 @@ async def verify_user_token(authorization: str) -> dict:
         )
     
     token = authorization.split(" ")[1]
-    user = verify_token(token)  # verify_token is synchronous, no await needed
+    user = await verify_token(token)
     return user
 
 # Simple connection manager for WebSocket
@@ -177,7 +177,7 @@ async def create_anomaly(
     """Create anomaly alert (operator only)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user.get("role") != "operator":
+    if user["role"] != UserRole.OPERATOR:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     anomaly = Anomaly(
@@ -213,7 +213,7 @@ async def create_observation(
     """Create observation for sensor data (RF004)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user.get("role") != "operator":
+    if user["role"] != UserRole.OPERATOR:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Validate text length (10-500 characters as per business rule)
@@ -358,8 +358,7 @@ async def get_monitoring_dashboard(
     """Get monitoring dashboard metrics"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    user_role = user.get("role", "")
-    if user_role not in ["operator", "maintenance_manager"]:
+    if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Basic metrics
@@ -403,9 +402,7 @@ async def generate_sensor_report(
     """Generate sensor data report (RF002)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    # Compare with string values directly since token returns strings
-    user_role = user.get("role", "")
-    if user_role not in ["operator", "crisis_manager"]:
+    if user["role"] not in [UserRole.OPERATOR, UserRole.CRISIS_MANAGER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Validate period (max 90 days as per business rule)

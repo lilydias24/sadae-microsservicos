@@ -34,10 +34,20 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    // Handle 401 Unauthorized errors (token expired or invalid)
     if (error.response?.status === 401) {
-      localStorage.removeItem("token")
-      localStorage.removeItem("user")
-      window.location.href = "/login"
+      const currentPath = window.location.pathname
+      
+      // Avoid redirect loop if already on login or public pages
+      if (currentPath !== '/login' && !currentPath.startsWith('/forgot-password') && !currentPath.startsWith('/reset-password')) {
+        // Clear authentication data
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        
+        // Redirect to login with return URL
+        const returnUrl = encodeURIComponent(currentPath)
+        window.location.href = `/login?redirect=${returnUrl}`
+      }
     }
     return Promise.reject(error)
   },
@@ -50,6 +60,13 @@ export const authService = {
   register: (userData: any) => api.post("/auth/register", userData),
 
   getCurrentUser: () => api.get("/me"),
+
+  forgotPassword: (email: string) => api.post("/auth/forgot-password", { email }),
+
+  resetPassword: (token: string, newPassword: string) => 
+    api.post("/auth/reset-password", { token, new_password: newPassword }),
+
+  verifyResetToken: (token: string) => api.post("/auth/verify-reset-token", { token }),
 }
 
 export const monitoringService = {

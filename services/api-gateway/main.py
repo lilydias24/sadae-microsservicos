@@ -95,6 +95,14 @@ def add_cors_headers(response_data: any):
         )
     return response_data
 
+def parse_error_detail(response):
+    """Helper function to parse error detail from response"""
+    try:
+        error_data = response.json()
+        return error_data.get("detail", response.text)
+    except:
+        return response.text
+
 async def proxy_request_to_service(
     service_name: str,
     method: str,
@@ -181,10 +189,19 @@ async def login(request: Request):
             
             if response.status_code != 200:
                 print(f"❌ Auth service error: {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=response.text)
+                # Parse error detail from JSON response
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get("detail", response.text)
+                except:
+                    error_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=error_detail)
                 
             return response.json()
             
+    except HTTPException:
+        # Re-raise HTTPException without modification
+        raise
     except httpx.ConnectError as e:
         print(f"❌ Connection error to auth service: {e}")
         raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
@@ -215,7 +232,8 @@ async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depe
             headers={"Authorization": f"Bearer {token}"}
         )
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            error_detail = parse_error_detail(response)
+            raise HTTPException(status_code=response.status_code, detail=error_detail)
         return response.json()
 
 @app.put("/auth/me")
@@ -234,8 +252,96 @@ async def update_current_user(request: Request, credentials: HTTPAuthorizationCr
             }
         )
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            error_detail = parse_error_detail(response)
+            raise HTTPException(status_code=response.status_code, detail=error_detail)
         return response.json()
+
+@app.post("/auth/forgot-password")
+async def forgot_password(request: Request):
+    """Request password reset"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying forgot-password to: {auth_url}/forgot-password")
+            
+            response = await client.post(
+                f"{auth_url}/forgot-password",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Forgot password failed: {e}")
+
+@app.post("/auth/verify-reset-token")
+async def verify_reset_token(request: Request):
+    """Verify password reset token"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            
+            response = await client.post(
+                f"{auth_url}/verify-reset-token",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/reset-password")
+async def reset_password(request: Request):
+    """Reset password with token"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying reset-password to: {auth_url}/reset-password")
+            
+            response = await client.post(
+                f"{auth_url}/reset-password",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Reset password failed: {e}")
 
 # Monitoring routes
 @app.get("/monitoring/sensors")

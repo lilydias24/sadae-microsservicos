@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
 import { maintenanceDev } from "../services/maintenanceService"
 import { useAuth } from "../contexts/AuthContext"
 
@@ -38,8 +39,9 @@ interface Complaint {
 
 export function MaintenancePage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints">("orders")
+  const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints" | "chat">("orders")
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null)
   const [showCreateOrder, setShowCreateOrder] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -467,10 +469,17 @@ export function MaintenancePage() {
             { id: "orders", name: "Ordens de Serviço", icon: "" },
             { id: "teams", name: "Equipes", icon: "" },
             { id: "complaints", name: "Reclamações", icon: "" },
+            { id: "chat", name: "Chat", icon: "🛠️" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => {
+                if (tab.id === "chat") {
+                  navigate("/maintenance-chat")
+                } else {
+                  setActiveTab(tab.id as any)
+                }
+              }}
               className={`py-2 px-1 border-b-2 font-medium text-sm ${
                 activeTab === tab.id
                   ? "border-blue-500 text-blue-600"

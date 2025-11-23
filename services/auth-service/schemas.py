@@ -44,3 +44,16 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     user: UserInToken
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class VerifyResetTokenRequest(BaseModel):
+    token: str
+
+class MessageResponse(BaseModel):
+    message: str
