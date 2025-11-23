@@ -62,7 +62,7 @@ export function ServiceOrderDetailModal({ order, onClose, onUpdate }: ServiceOrd
 
   useEffect(() => {
     loadOrderDetails()
-  }, [order.id])
+  }, [order.id, order.status, order.updated_at])
 
   const loadOrderDetails = async () => {
     try {
@@ -73,14 +73,17 @@ export function ServiceOrderDetailModal({ order, onClose, onUpdate }: ServiceOrd
       const detail = detailRes.data as any
       setOrderDetail(detail)
       setProgressList(Array.isArray(progressRes.data) ? progressRes.data : [])
-      setEditedOrder({
-        title: detail.title,
-        description: detail.description,
-        priority: detail.priority,
-        status: detail.status,
-        location: detail.location,
-        estimated_duration: detail.estimated_duration
-      })
+      // Se não estiver editando, atualiza com os dados mais recentes
+      if (!isEditing) {
+        setEditedOrder({
+          title: detail.title,
+          description: detail.description,
+          priority: detail.priority,
+          status: detail.status,
+          location: detail.location,
+          estimated_duration: detail.estimated_duration
+        })
+      }
     } catch (error) {
       console.error("Erro ao carregar detalhes:", error)
     }
@@ -136,8 +139,8 @@ export function ServiceOrderDetailModal({ order, onClose, onUpdate }: ServiceOrd
     )
   }
 
-  const priorityConfig = getPriorityConfig(orderDetail.priority)
-  const statusConfig = getStatusConfig(orderDetail.status)
+  const priorityConfig = getPriorityConfig(orderDetail.priority || order.priority)
+  const statusConfig = getStatusConfig(orderDetail.status || order.status)
   const StatusIcon = statusConfig.icon
 
   return (
@@ -331,6 +334,8 @@ export function ServiceOrderDetailModal({ order, onClose, onUpdate }: ServiceOrd
                     onChange={(e) => setNewProgress({ ...newProgress, status: e.target.value as any })}
                     className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
+                    <option value="open">Aberta</option>
+                    <option value="assigned">Atribuída</option>
                     <option value="in_progress">Em Progresso</option>
                     <option value="completed">Concluída</option>
                   </select>
