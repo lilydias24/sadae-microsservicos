@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { maintenanceDev } from "../services/maintenanceService"
 import { useAuth } from "../contexts/AuthContext"
 import { ServiceOrderKanban } from "../components/ServiceOrderKanban"
+import { ServiceOrderDetailModal } from "../components/ServiceOrderDetailModal"
 import { LayoutGrid, List } from "lucide-react"
 
 interface WorkOrder {
@@ -61,10 +62,7 @@ export function MaintenancePage() {
     equipment_csv: "",
   })
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({ name: "", role: "", contact: "" })
-  const [orderDetail, setOrderDetail] = useState<any | null>(null)
-  const [showOrderDetail, setShowOrderDetail] = useState(false)
-  const [orderProgress, setOrderProgress] = useState<any[]>([])
-  const [newProgress, setNewProgress] = useState<{status: WorkOrder["status"], progress_notes: string, estimated_completion?: string}>({ status: "in_progress", progress_notes: "" })
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<WorkOrder | null>(null)
   
   // Estados para tags dinâmicas
   const [workAreaTags, setWorkAreaTags] = useState<string[]>([])
@@ -210,16 +208,8 @@ export function MaintenancePage() {
     }
   })
 
-  const openOrderDetail = async (order: WorkOrder) => {
-    try {
-      const res = await maintenanceDev.getWorkOrder(parseInt(order.id))
-      setOrderDetail(res.data)
-      const prog = await maintenanceDev.getOrderProgress(parseInt(order.id))
-      setOrderProgress(Array.isArray(prog.data) ? prog.data : [])
-      setShowOrderDetail(true)
-    } catch (e) {
-      console.error(e)
-    }
+  const openOrderDetail = (order: WorkOrder) => {
+    setSelectedOrderForDetail(order)
   }
 
   // Mapeamento de status e prioridades para exibição
@@ -1267,61 +1257,12 @@ export function MaintenancePage() {
       )}
 
       {/* Order Detail Modal */}
-      {showOrderDetail && orderDetail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900">Detalhes da OS - {orderDetail.title}</h3>
-            <div className="mt-3 text-sm space-y-1">
-              <div><b>Protocolo:</b> {orderDetail.protocol_number}</div>
-              <div><b>Status:</b> {orderDetail.status}</div>
-              <div><b>Prioridade:</b> {orderDetail.priority}</div>
-              <div><b>Equipe:</b> {orderDetail.assigned_team || '—'}</div>
-              <div><b>Local:</b> {orderDetail.location}</div>
-              <div className="pt-2"><b>Descrição:</b> {orderDetail.description}</div>
-              <div className="text-xs text-gray-500 pt-2">Criado em {new Date(orderDetail.created_at).toLocaleString()}</div>
-            </div>
-            <div className="mt-4 border-t pt-3">
-              <h4 className="font-semibold mb-2">Andamentos</h4>
-              <div className="max-h-40 overflow-auto space-y-2">
-                {orderProgress.map((p: any) => (
-                  <div key={p.id} className="border rounded px-2 py-1 text-sm">
-                    <div className="flex justify-between">
-                      <div className="font-medium">{p.status}</div>
-                      <div className="text-xs text-gray-500">{new Date(p.created_at).toLocaleString()}</div>
-                    </div>
-                    <div className="text-gray-700">{p.progress_notes}</div>
-                    {p.created_by_name && <div className="text-xs text-gray-500">por {p.created_by_name}</div>}
-                  </div>
-                ))}
-                {orderProgress.length === 0 && <div className="text-sm text-gray-500">Sem andamentos.</div>}
-              </div>
-              <form
-                className="mt-3 grid grid-cols-1 gap-2"
-                onSubmit={async (e) => {
-                  e.preventDefault()
-                  await maintenanceDev.addOrderProgress(orderDetail.id, newProgress)
-                  const prog = await maintenanceDev.getOrderProgress(orderDetail.id)
-                  setOrderProgress(Array.isArray(prog.data) ? prog.data : [])
-                  const updated = await maintenanceDev.getWorkOrder(orderDetail.id)
-                  setOrderDetail(updated.data)
-                  setNewProgress({ status: "in_progress", progress_notes: "" })
-                }}
-              >
-                <select className="border rounded px-2 py-1" value={newProgress.status} onChange={(e) => setNewProgress({ ...newProgress, status: e.target.value as any })}>
-                  <option value="in_progress">Em progresso</option>
-                  <option value="completed">Concluída</option>
-                </select>
-                <textarea className="border rounded px-2 py-1" placeholder="Notas de andamento" value={newProgress.progress_notes} onChange={(e) => setNewProgress({ ...newProgress, progress_notes: e.target.value })} required />
-                <div className="flex justify-end">
-                  <button type="submit" className="px-3 py-1 bg-blue-600 text-white rounded">Adicionar Andamento</button>
-                </div>
-              </form>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowOrderDetail(false)} className="px-3 py-1 border rounded">Fechar</button>
-            </div>
-          </div>
-        </div>
+      {selectedOrderForDetail && (
+        <ServiceOrderDetailModal
+          order={selectedOrderForDetail}
+          onClose={() => setSelectedOrderForDetail(null)}
+          onUpdate={() => queryClient.invalidateQueries({ queryKey: ['workOrders'] })}
+        />
       )}
     </div>
   )
