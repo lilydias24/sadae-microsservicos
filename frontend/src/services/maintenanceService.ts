@@ -287,4 +287,18 @@ export const maintenanceDev = {
   }): Promise<AxiosResponse<{ data: Complaint }>> {
     return maintenanceDirect.post("/maintenance/public/complaints", data)
   },
+
+  // Anomaly Integration
+  createOrderFromAnomaly(data: {
+    anomaly_id: number
+    sensor_id: string
+    sensor_type: string
+    location: string
+    description: string
+    severity: string
+    value: number
+    threshold_value: number
+  }): Promise<AxiosResponse<{ data: WorkOrder }>> {
+    return maintenanceDirect.post("/maintenance/orders/from-anomaly", data)
+  },
 }

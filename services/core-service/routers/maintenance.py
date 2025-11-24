@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import and_, or_, desc, func
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 # Add shared modules to path (use append to keep local imports priority)
 sys.path.append('/app/shared')
@@ -984,3 +985,127 @@ async def generate_interventions_report(
         "generated_at": datetime.now(),
         "generated_by": user.get("name", "Unknown")
     }
+
+# ==================== ANOMALY INTEGRATION ====================
+
+def map_sensor_type_to_specialization(sensor_type: str) -> str:
+    """
+    Map sensor type to team specialization
+    
+    Sensor types from monitoring service:
+    - pressure: 🚰 Hidráulica
+    - flow: 🚰 Hidráulica  
+    - water_quality: 🧪 Qualidade da Água (maps to Hidráulica)
+    - precipitation: 🌧️ Drenagem (maps to Civil/Estrutural)
+    - river_level: 🌊 Monitoramento Fluvial (maps to Civil/Estrutural)
+    """
+    sensor_to_team = {
+        "pressure": "🚰 Hidráulica",
+        "flow": "🚰 Hidráulica",
+        "water_quality": "🚰 Hidráulica",
+        "precipitation": "🏗️ Civil/Estrutural",
+        "river_level": "🏗️ Civil/Estrutural"
+    }
+    return sensor_to_team.get(sensor_type, "🔧 Manutenção Geral")
+
+class AnomalyServiceOrderCreate(BaseModel):
+    """Schema for creating service order from anomaly"""
+    anomaly_id: int
+    sensor_id: str
+    sensor_type: str
+    location: str
+    description: str
+    severity: str
+    value: float
+    threshold_value: float
+
+@router.post("/orders/from-anomaly", response_model=ServiceOrderResponse)
+async def create_service_order_from_anomaly(
+    anomaly_data: AnomalyServiceOrderCreate,
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Create service order from monitoring anomaly
+    Automatically suggests best team specialization based on sensor type
+    """
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas gerentes de manutenção e operadores podem criar ordens de serviço"
+        )
+    
+    # Map sensor type to team specialization
+    suggested_specialization = map_sensor_type_to_specialization(anomaly_data.sensor_type)
+    
+    # Map severity to priority
+    severity_to_priority = {
+        "low": AlertLevel.LOW,
+        "medium": AlertLevel.MEDIUM,
+        "high": AlertLevel.HIGH,
+        "critical": AlertLevel.CRITICAL
+    }
+    priority = severity_to_priority.get(anomaly_data.severity.lower(), AlertLevel.MEDIUM)
+    
+    # Generate protocol number
+    protocol_number = generate_protocol_number()
+    
+    # Create service order
+    service_order = ServiceOrder(
+        title=f"Anomalia detectada - {anomaly_data.sensor_id}",
+        description=f"""Anomalia detectada pelo sistema de monitoramento:
+
+Sensor: {anomaly_data.sensor_id}
+Tipo: {anomaly_data.sensor_type}
+Localização: {anomaly_data.location}
+Valor medido: {anomaly_data.value}
+Limite: {anomaly_data.threshold_value}
+Descrição: {anomaly_data.description}
+
+Especialização sugerida: {suggested_specialization}""",
+        priority=priority,
+        location=anomaly_data.location,
+        anomaly_id=anomaly_data.anomaly_id,
+        protocol_number=protocol_number,
+        created_by=user["id"],
+        created_by_name=user["name"],
+        status=ServiceOrderStatus.OPEN,
+        notes=f"Especialização sugerida: {suggested_specialization}"
+    )
+    
+    db.add(service_order)
+    db.commit()
+    db.refresh(service_order)
+    
+    # Try to auto-assign to available team with matching specialization
+    available_team = db.query(Team).filter(
+        Team.specialization == suggested_specialization,
+        Team.is_active == True,
+        Team.current_workload < Team.max_concurrent_orders
+    ).first()
+    
+    if available_team:
+        # Auto-assign to best matching team
+        service_order.assigned_team = available_team.name
+        service_order.assigned_at = datetime.now()
+        service_order.status = ServiceOrderStatus.ASSIGNED
+        
+        # Update team workload
+        available_team.current_workload += 1
+        
+        # Create progress entry
+        progress = ServiceOrderProgress(
+            service_order_id=service_order.id,
+            status=ServiceOrderStatus.ASSIGNED,
+            progress_notes=f"Ordem atribuída automaticamente à equipe {available_team.name} (especialização: {suggested_specialization})",
+            created_by=user["id"],
+            created_by_name=user.get("name")
+        )
+        db.add(progress)
+        db.commit()
+        db.refresh(service_order)
+    
+    return service_order

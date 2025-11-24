@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { monitoringDev } from "../services/monitoringService"
+import { maintenanceDev } from "../services/maintenanceService"
 import { useWebSocket } from "../contexts/WebSocketContext"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { api } from "../services/api"
 import { useAuth } from "../contexts/AuthContext"
 import { Modal } from "../components/ui"
-import { MessageSquare, Map as MapIcon, List } from "lucide-react"
+import { MessageSquare, Map as MapIcon, List, Wrench } from "lucide-react"
 import { DigitalTwinMap } from "../components/DigitalTwinMap"
 import { generateSmartMeters } from "../utils/generateSmartMeters"
 
@@ -28,8 +29,12 @@ interface SensorReading {
 interface Anomaly {
   id: string
   sensor_id: string
+  sensor_type?: string
+  location?: string
+  value?: number
+  threshold_value?: number
   description: string
-  severity: "low" | "medium" | "high"
+  severity: "low" | "medium" | "high" | "critical"
   status: "pending" | "confirmed" | "resolved"
   created_at: string
 }
@@ -133,6 +138,10 @@ export function MonitoringPage() {
           data: an.data?.map((a: any) => ({
             id: String(a.id),
             sensor_id: a.sensor_id,
+            sensor_type: a.sensor_type,
+            location: a.location,
+            value: a.value,
+            threshold_value: a.threshold_value,
             description: a.description,
             severity: a.severity,
             status: a.status,
@@ -181,6 +190,10 @@ export function MonitoringPage() {
         data: an.data?.map((a: any) => ({
           id: String(a.id),
           sensor_id: a.sensor_id,
+          sensor_type: a.sensor_type,
+          location: a.location,
+          value: a.value,
+          threshold_value: a.threshold_value,
           description: a.description,
           severity: a.severity,
           status: a.status,
@@ -189,6 +202,63 @@ export function MonitoringPage() {
       })
     } catch (e) {
       // noop
+    } finally {
+      setIsUpdating(null)
+    }
+  }
+
+  // Função para criar ordem de serviço a partir de anomalia
+  const handleCreateServiceOrder = async (anomaly: Anomaly) => {
+    if (!user) {
+      alert("Você precisa estar autenticado para criar ordens de serviço")
+      return
+    }
+
+    // Verificar permissões
+    if (user.role !== "operator" && user.role !== "maintenance_manager") {
+      alert("Apenas operadores e gerentes de manutenção podem criar ordens de serviço")
+      return
+    }
+
+    try {
+      setIsUpdating(Number(anomaly.id))
+      
+      const response = await maintenanceDev.createOrderFromAnomaly({
+        anomaly_id: Number(anomaly.id),
+        sensor_id: anomaly.sensor_id,
+        sensor_type: anomaly.sensor_type || "unknown",
+        location: anomaly.location || "Localização não especificada",
+        description: anomaly.description,
+        severity: anomaly.severity,
+        value: anomaly.value || 0,
+        threshold_value: anomaly.threshold_value || 0
+      })
+
+      const serviceOrder = response.data.data || response.data
+      alert(`✅ Ordem de serviço criada com sucesso!\nProtocolo: ${serviceOrder.protocol_number}`)
+      
+      // Atualizar status da anomalia para "confirmed"
+      await monitoringDev.updateAnomalyStatus(Number(anomaly.id), "confirmed" as any)
+      
+      // Recarregar anomalias
+      const an = await monitoringDev.getAnomalies({ status: "pending", limit: anomaliesLimit })
+      setAnomalies({
+        data: an.data?.map((a: any) => ({
+          id: String(a.id),
+          sensor_id: a.sensor_id,
+          sensor_type: a.sensor_type,
+          location: a.location,
+          value: a.value,
+          threshold_value: a.threshold_value,
+          description: a.description,
+          severity: a.severity,
+          status: a.status,
+          created_at: a.created_at,
+        })) ?? []
+      })
+    } catch (error: any) {
+      console.error("Erro ao criar ordem de serviço:", error)
+      alert(`❌ Erro ao criar ordem de serviço: ${error.response?.data?.detail || error.message}`)
     } finally {
       setIsUpdating(null)
     }
@@ -560,24 +630,37 @@ export function MonitoringPage() {
                       <p className="text-sm text-gray-600 mt-1">{translateAnomalyDescription(anomaly.description)}</p>
                       <p className="text-xs text-gray-500 mt-1">{new Date(anomaly.created_at).toLocaleString("pt-BR")}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col items-end gap-2">
                       <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
                         {translateSeverity(anomaly.severity)}
                       </span>
-                      <button
-                        onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
-                        disabled={isUpdating === Number(anomaly.id)}
-                        className="px-2 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                      >
-                        {isUpdating === Number(anomaly.id) ? "..." : "Confirmar"}
-                      </button>
-                      <button
-                        onClick={() => handleAnomalyAction(Number(anomaly.id), "resolve")}
-                        disabled={isUpdating === Number(anomaly.id)}
-                        className="px-2 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                      >
-                        {isUpdating === Number(anomaly.id) ? "..." : "Fechar"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {(user?.role === "operator" || user?.role === "maintenance_manager") && (
+                          <button
+                            onClick={() => handleCreateServiceOrder(anomaly)}
+                            disabled={isUpdating === Number(anomaly.id)}
+                            className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                            title="Criar Ordem de Serviço"
+                          >
+                            <Wrench className="w-3 h-3" />
+                            <span>Criar OS</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
+                          disabled={isUpdating === Number(anomaly.id)}
+                          className="px-2 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {isUpdating === Number(anomaly.id) ? "..." : "Confirmar"}
+                        </button>
+                        <button
+                          onClick={() => handleAnomalyAction(Number(anomaly.id), "resolve")}
+                          disabled={isUpdating === Number(anomaly.id)}
+                          className="px-2 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          {isUpdating === Number(anomaly.id) ? "..." : "Fechar"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
