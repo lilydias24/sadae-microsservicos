@@ -72,6 +72,8 @@ export function MaintenancePage() {
   })
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({ name: "", role: "", contact: "" })
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<WorkOrder | null>(null)
+  const [teamSearchQuery, setTeamSearchQuery] = useState("")
+  const [selectedSpecialization, setSelectedSpecialization] = useState<string>("all")
   
   // Estados para tags dinâmicas
   const [workAreaTags, setWorkAreaTags] = useState<string[]>([])
@@ -637,19 +639,103 @@ export function MaintenancePage() {
 
       {activeTab === "teams" && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button 
-              onClick={() => setShowCreateTeam(true)} 
-              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-medium shadow-lg shadow-blue-500/30 transition flex items-center"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Nova Equipe
-            </button>
+          {/* Header com busca, filtros e botão de criar */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+              {/* Busca e Filtros */}
+              <div className="flex-1 w-full lg:w-auto flex flex-col sm:flex-row gap-3">
+                {/* Campo de busca */}
+                <div className="relative flex-1 min-w-[250px]">
+                  <svg 
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Buscar equipe por nome, supervisor..."
+                    value={teamSearchQuery}
+                    onChange={(e) => setTeamSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  />
+                  {teamSearchQuery && (
+                    <button
+                      onClick={() => setTeamSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filtro por especialização */}
+                <div className="relative min-w-[200px]">
+                  <svg 
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <select
+                    value={selectedSpecialization}
+                    onChange={(e) => setSelectedSpecialization(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition appearance-none bg-white cursor-pointer"
+                  >
+                    <option value="all">Todas Especializações</option>
+                    <option value="🚰 Hidráulica">🚰 Hidráulica</option>
+                    <option value="⚡ Elétrica">⚡ Elétrica</option>
+                    <option value="🏗️ Civil / Estrutural">🏗️ Civil / Estrutural</option>
+                    <option value="🌳 Paisagismo">🌳 Paisagismo</option>
+                    <option value="🧹 Limpeza Urbana">🧹 Limpeza Urbana</option>
+                    <option value="🚦 Sinalização">🚦 Sinalização</option>
+                    <option value="🔧 Manutenção Geral">🔧 Manutenção Geral</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Botão Nova Equipe */}
+              <button 
+                onClick={() => setShowCreateTeam(true)} 
+                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-medium shadow-lg shadow-blue-500/30 transition flex items-center whitespace-nowrap"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Nova Equipe
+              </button>
+            </div>
+
+            {/* Info de resultados */}
+            {(teamSearchQuery || selectedSpecialization !== "all") && (
+              <div className="mt-3 text-sm text-gray-600">
+                Mostrando {teams.filter((team: Team) => {
+                  const matchesSearch = !teamSearchQuery || 
+                    team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                    (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+                  const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+                  return matchesSearch && matchesSpecialization;
+                }).length} de {teams.length} equipes
+              </div>
+            )}
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {teams.map((team: Team) => (
+          {teams
+            .filter((team: Team) => {
+              const matchesSearch = !teamSearchQuery || 
+                team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+              const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+              return matchesSearch && matchesSpecialization;
+            })
+            .map((team: Team) => (
             <div 
               key={team.id} 
               className={`rounded-xl shadow-lg border-2 transition-all hover:shadow-xl ${
@@ -816,6 +902,38 @@ export function MaintenancePage() {
             </div>
           ))}
           </div>
+
+          {/* Mensagem quando não há resultados */}
+          {teams
+            .filter((team: Team) => {
+              const matchesSearch = !teamSearchQuery || 
+                team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+              const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+              return matchesSearch && matchesSpecialization;
+            }).length === 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+              <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhuma equipe encontrada</h3>
+              <p className="text-gray-600 mb-4">
+                {teamSearchQuery 
+                  ? `Não encontramos equipes correspondentes a "${teamSearchQuery}"`
+                  : "Não encontramos equipes com essa especialização"
+                }
+              </p>
+              <button
+                onClick={() => {
+                  setTeamSearchQuery("");
+                  setSelectedSpecialization("all");
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                Limpar Filtros
+              </button>
+            </div>
+          )}
         </div>
       )}
 
