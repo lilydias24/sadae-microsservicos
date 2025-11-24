@@ -7,7 +7,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { api } from "../services/api"
 import { useAuth } from "../contexts/AuthContext"
 import { Modal } from "../components/ui"
-import { MessageSquare } from "lucide-react"
+import { MessageSquare, Map as MapIcon, List } from "lucide-react"
+import { DigitalTwinMap } from "../components/DigitalTwinMap"
+import { generateSmartMeters } from "../utils/generateSmartMeters"
 
 // --- INTERFACES (mantidas para estrutura) ---
 interface SensorReading {
@@ -18,6 +20,8 @@ interface SensorReading {
   unit: string
   timestamp: string
   location: string
+  latitude?: number
+  longitude?: number
   status: "normal" | "warning" | "critical"
 }
 
@@ -32,12 +36,48 @@ interface Anomaly {
 
 // --- DADOS MOCADOS ---
 const mockSensors: SensorReading[] = [
-  { id: "s1", sensor_id: "P-101", sensor_type: "pressure", value: 3.5, unit: "bar", timestamp: new Date().toISOString(), location: "Estação Central", status: "normal" },
-  { id: "s2", sensor_id: "F-203", sensor_type: "flow", value: 150.2, unit: "m³/h", timestamp: new Date().toISOString(), location: "Reservatório Norte", status: "normal" },
-  { id: "s3", sensor_id: "L-301", sensor_type: "level", value: 85, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Sul", status: "warning" },
-  { id: "s4", sensor_id: "Q-405", sensor_type: "quality", value: 0.5, unit: "mg/L", timestamp: new Date().toISOString(), location: "Rede Distrital Leste", status: "normal" },
-  { id: "s5", sensor_id: "P-102", sensor_type: "pressure", value: 4.8, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Industrial", status: "critical" },
-  { id: "s6", sensor_id: "PC-501", sensor_type: "precipitation", value: 2.1, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Meteorológica", status: "normal" },
+  // Zona Central
+  { id: "s1", sensor_id: "P-101", sensor_type: "pressure", value: 3.5, unit: "bar", timestamp: new Date().toISOString(), location: "Estação Central - Sé", latitude: -23.5505, longitude: -46.6333, status: "normal" },
+  { id: "s2", sensor_id: "F-102", sensor_type: "flow", value: 150.2, unit: "m³/h", timestamp: new Date().toISOString(), location: "República", latitude: -23.5443, longitude: -46.6431, status: "normal" },
+  { id: "s3", sensor_id: "Q-103", sensor_type: "quality", value: 0.5, unit: "mg/L", timestamp: new Date().toISOString(), location: "Consolação", latitude: -23.5537, longitude: -46.6602, status: "normal" },
+
+  // Zona Norte
+  { id: "s4", sensor_id: "P-201", sensor_type: "pressure", value: 3.8, unit: "bar", timestamp: new Date().toISOString(), location: "Santana", latitude: -23.5089, longitude: -46.6289, status: "normal" },
+  { id: "s5", sensor_id: "F-202", sensor_type: "flow", value: 180.5, unit: "m³/h", timestamp: new Date().toISOString(), location: "Tucuruvi", latitude: -23.4801, longitude: -46.6025, status: "normal" },
+  { id: "s6", sensor_id: "L-203", sensor_type: "level", value: 92, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Cantareira", latitude: -23.4489, longitude: -46.6388, status: "normal" },
+  { id: "s7", sensor_id: "P-204", sensor_type: "pressure", value: 3.2, unit: "bar", timestamp: new Date().toISOString(), location: "Casa Verde", latitude: -23.5178, longitude: -46.6567, status: "normal" },
+
+  // Zona Sul
+  { id: "s8", sensor_id: "P-301", sensor_type: "pressure", value: 3.6, unit: "bar", timestamp: new Date().toISOString(), location: "Vila Mariana", latitude: -23.5881, longitude: -46.6386, status: "normal" },
+  { id: "s9", sensor_id: "L-302", sensor_type: "level", value: 85, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Guarapiranga", latitude: -23.6558, longitude: -46.6396, status: "warning" },
+  { id: "s10", sensor_id: "F-303", sensor_type: "flow", value: 165.3, unit: "m³/h", timestamp: new Date().toISOString(), location: "Santo Amaro", latitude: -23.6528, longitude: -46.7056, status: "normal" },
+  { id: "s11", sensor_id: "Q-304", sensor_type: "quality", value: 0.4, unit: "mg/L", timestamp: new Date().toISOString(), location: "Interlagos", latitude: -23.6806, longitude: -46.6750, status: "normal" },
+  { id: "s12", sensor_id: "P-305", sensor_type: "pressure", value: 3.9, unit: "bar", timestamp: new Date().toISOString(), location: "Jabaquara", latitude: -23.6178, longitude: -46.6428, status: "normal" },
+
+  // Zona Leste
+  { id: "s13", sensor_id: "P-401", sensor_type: "pressure", value: 3.3, unit: "bar", timestamp: new Date().toISOString(), location: "Tatuapé", latitude: -23.5408, longitude: -46.5767, status: "normal" },
+  { id: "s14", sensor_id: "F-402", sensor_type: "flow", value: 142.8, unit: "m³/h", timestamp: new Date().toISOString(), location: "Penha", latitude: -23.5289, longitude: -46.5411, status: "normal" },
+  { id: "s15", sensor_id: "Q-403", sensor_type: "quality", value: 0.6, unit: "mg/L", timestamp: new Date().toISOString(), location: "São Miguel", latitude: -23.4975, longitude: -46.4361, status: "normal" },
+  { id: "s16", sensor_id: "L-404", sensor_type: "level", value: 78, unit: "%", timestamp: new Date().toISOString(), location: "Reservatório Aricanduva", latitude: -23.5625, longitude: -46.5178, status: "warning" },
+
+  // Zona Oeste
+  { id: "s17", sensor_id: "P-501", sensor_type: "pressure", value: 4.1, unit: "bar", timestamp: new Date().toISOString(), location: "Pinheiros", latitude: -23.5617, longitude: -46.6822, status: "normal" },
+  { id: "s18", sensor_id: "F-502", sensor_type: "flow", value: 195.7, unit: "m³/h", timestamp: new Date().toISOString(), location: "Lapa", latitude: -23.5283, longitude: -46.7056, status: "normal" },
+  { id: "s19", sensor_id: "Q-503", sensor_type: "quality", value: 0.3, unit: "mg/L", timestamp: new Date().toISOString(), location: "Butantã", latitude: -23.5736, longitude: -46.7286, status: "normal" },
+  { id: "s20", sensor_id: "P-504", sensor_type: "pressure", value: 4.8, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Industrial - Jaguaré", latitude: -23.5520, longitude: -46.7420, status: "critical" },
+
+  // Estações de Tratamento
+  { id: "s21", sensor_id: "Q-601", sensor_type: "quality", value: 0.2, unit: "mg/L", timestamp: new Date().toISOString(), location: "ETA Guaraú", latitude: -23.4650, longitude: -46.6150, status: "normal" },
+  { id: "s22", sensor_id: "Q-602", sensor_type: "quality", value: 0.3, unit: "mg/L", timestamp: new Date().toISOString(), location: "ETA Alto da Boa Vista", latitude: -23.6350, longitude: -46.6850, status: "normal" },
+
+  // Monitoramento Meteorológico
+  { id: "s23", sensor_id: "PC-701", sensor_type: "precipitation", value: 2.1, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Meteorológica - Ibirapuera", latitude: -23.5875, longitude: -46.6575, status: "normal" },
+  { id: "s24", sensor_id: "PC-702", sensor_type: "precipitation", value: 0.0, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Norte", latitude: -23.4900, longitude: -46.6200, status: "normal" },
+  { id: "s25", sensor_id: "PC-703", sensor_type: "precipitation", value: 1.5, unit: "mm", timestamp: new Date().toISOString(), location: "Estação Sul", latitude: -23.6500, longitude: -46.6800, status: "normal" },
+
+  // Pontos Críticos
+  { id: "s26", sensor_id: "P-801", sensor_type: "pressure", value: 2.1, unit: "bar", timestamp: new Date().toISOString(), location: "Zona Crítica - Capão Redondo", latitude: -23.6689, longitude: -46.7789, status: "warning" },
+  { id: "s27", sensor_id: "F-802", sensor_type: "flow", value: 95.3, unit: "m³/h", timestamp: new Date().toISOString(), location: "Brasilândia", latitude: -23.4650, longitude: -46.6850, status: "warning" },
 ];
 
 const mockAnomalies: Anomaly[] = [
@@ -47,8 +87,8 @@ const mockAnomalies: Anomaly[] = [
 ];
 
 const mockRealtimeChartData = Array.from({ length: 50 }, (_, i) => ({
-    value: 3.5 + Math.sin(i / 5) * 0.5 + (Math.random() - 0.5) * 0.2,
-    timestamp: new Date(Date.now() - (50 - i) * 60 * 1000).toISOString(),
+  value: 3.5 + Math.sin(i / 5) * 0.5 + (Math.random() - 0.5) * 0.2,
+  timestamp: new Date(Date.now() - (50 - i) * 60 * 1000).toISOString(),
 }));
 
 
@@ -62,7 +102,7 @@ export function MonitoringPage() {
   const [anomalies, setAnomalies] = useState<{ data: Anomaly[] }>({ data: [] })
   const [anomaliesLimit, setAnomaliesLimit] = useState<number>(20)
   const [isUpdating, setIsUpdating] = useState<number | null>(null)
-  
+
   // Estados para observações (RF004)
   const [showObservationModal, setShowObservationModal] = useState(false)
   const [selectedReading, setSelectedReading] = useState<{ sensor_id: string; reading_id?: number; timestamp: string } | null>(null)
@@ -70,6 +110,10 @@ export function MonitoringPage() {
   const [observationType, setObservationType] = useState<string>("general")
   const [isSubmittingObservation, setIsSubmittingObservation] = useState(false)
   const [observations, setObservations] = useState<any[]>([])
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
+
+  // Generate smart meters based on network sensors
+  const [smartMeters] = useState(() => generateSmartMeters(mockSensors))
 
   // Carregar dados iniciais (apenas uma vez)
   useEffect(() => {
@@ -85,14 +129,16 @@ export function MonitoringPage() {
           .sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
           .map((r: any) => ({ value: Number(r.value), timestamp: r.timestamp }))
         setRealtimeData(series)
-        setAnomalies({ data: an.data?.map((a: any) => ({
-          id: String(a.id),
-          sensor_id: a.sensor_id,
-          description: a.description,
-          severity: a.severity,
-          status: a.status,
-          created_at: a.created_at,
-        })) ?? [] })
+        setAnomalies({
+          data: an.data?.map((a: any) => ({
+            id: String(a.id),
+            sensor_id: a.sensor_id,
+            description: a.description,
+            severity: a.severity,
+            status: a.status,
+            created_at: a.created_at,
+          })) ?? []
+        })
         console.log("✅ Monitoring: Dados iniciais carregados")
       } catch (error) {
         console.log("❌ Monitoring: Erro ao carregar dados iniciais:", error)
@@ -106,7 +152,7 @@ export function MonitoringPage() {
     if (lastMessage && lastMessage.type === "sensor_reading") {
       const reading = lastMessage.data
       console.log("📡 WebSocket: Nova leitura recebida!", reading)
-      
+
       // Atualizar gráfico em tempo real
       setRealtimeData(prev => {
         const newData = [...prev, { value: Number(reading.value), timestamp: reading.timestamp }]
@@ -114,7 +160,7 @@ export function MonitoringPage() {
         return newData.slice(-50)
       })
     }
-    
+
     if (lastMessage && lastMessage.type === "anomaly_detected") {
       console.log("⚠️ WebSocket: Nova anomalia detectada!", lastMessage.data)
       // Adicionar anomalia à lista
@@ -131,14 +177,16 @@ export function MonitoringPage() {
       await monitoringDev.updateAnomalyStatus(id, newStatus as any)
       // refresh list
       const an = await monitoringDev.getAnomalies({ status: "pending", limit: anomaliesLimit })
-      setAnomalies({ data: an.data?.map((a: any) => ({
-        id: String(a.id),
-        sensor_id: a.sensor_id,
-        description: a.description,
-        severity: a.severity,
-        status: a.status,
-        created_at: a.created_at,
-      })) ?? [] })
+      setAnomalies({
+        data: an.data?.map((a: any) => ({
+          id: String(a.id),
+          sensor_id: a.sensor_id,
+          description: a.description,
+          severity: a.severity,
+          status: a.status,
+          created_at: a.created_at,
+        })) ?? []
+      })
     } catch (e) {
       // noop
     } finally {
@@ -156,9 +204,9 @@ export function MonitoringPage() {
   // Função para submeter observação (RF004)
   const handleSubmitObservation = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!selectedReading) return
-    
+
     // Validação: 10-500 caracteres
     if (observationText.length < 10) {
       alert("A observação deve ter no mínimo 10 caracteres")
@@ -178,12 +226,12 @@ export function MonitoringPage() {
         observation_type: observationType,
         timestamp: selectedReading.timestamp
       })
-      
+
       alert("Observação registrada com sucesso!")
       setShowObservationModal(false)
       setObservationText("")
       setSelectedReading(null)
-      
+
       // Recarregar observações se necessário
       // loadObservations()
     } catch (error: any) {
@@ -193,7 +241,7 @@ export function MonitoringPage() {
       setIsSubmittingObservation(false)
     }
   }
-  
+
   // Filtrando os sensores mocados com base no seletor
   const filteredSensors = selectedSensorType === "all"
     ? mockSensors
@@ -268,20 +316,20 @@ export function MonitoringPage() {
 
   const translateAnomalyDescription = (description: string): string => {
     if (!description) return ""
-    
+
     // Traduzir descrições automáticas em inglês
     if (description.toLowerCase().includes("automatic anomaly detection")) {
       // Padrão 1: "Automatic anomaly detection: river_level value 2.21 exceeds threshold"
       // Padrão 2: "Automatic anomaly detection: precipitation value 9.28 exceeds threshold"
       const typeMatch = description.match(/(river_level|precipitation|flow|water_quality|pressure|level|quality)\s+value\s+([0-9.]+)/i)
       const thresholdMatch = description.match(/exceeds\s+threshold/i)
-      
+
       if (typeMatch && thresholdMatch) {
         const sensorType = translateSensorType(typeMatch[1])
         const value = typeMatch[2]
         return `Detecção automática de anomalia: ${sensorType} com valor ${value} excede o limiar`
       }
-      
+
       // Tradução genérica com substituições
       return description
         .replace(/Automatic anomaly detection:/i, "Detecção automática de anomalia:")
@@ -318,6 +366,30 @@ export function MonitoringPage() {
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${viewMode === 'list'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+                }`}
+            >
+              <List className="w-4 h-4" />
+              <span className="text-sm font-medium">Lista</span>
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${viewMode === 'map'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+                }`}
+            >
+              <MapIcon className="w-4 h-4" />
+              <span className="text-sm font-medium">Mapa</span>
+            </button>
+          </div>
+
           <select
             value={selectedSensorType}
             onChange={(e) => setSelectedSensorType(e.target.value)}
@@ -432,75 +504,88 @@ export function MonitoringPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Sensors List */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Sensores Ativos</h3>
+      {/* Digital Twin Map or List View */}
+      {viewMode === 'map' ? (
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Mapa Digital Twin - Rede de Abastecimento</h3>
+            <p className="text-sm text-gray-600">Visualização em tempo real dos sensores na rede</p>
           </div>
-          <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-            {sensors?.data?.map((sensor: SensorReading) => (
-              <div key={sensor.id} className="px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {translateSensorType(sensor.sensor_type)} - {sensor.sensor_id}
-                    </p>
-                    <p className="text-sm text-gray-600">{sensor.location}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900">
-                      {sensor.value} {sensor.unit}
-                    </p>
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(sensor.status)}`}>
-                      {translateStatus(sensor.status)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="h-[600px]">
+            <DigitalTwinMap sensors={filteredSensors} smartMeters={smartMeters} />
           </div>
         </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Sensors List */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Sensores Ativos</h3>
+            </div>
+            <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+              {sensors?.data?.map((sensor: SensorReading) => (
+                <div key={sensor.id} className="px-6 py-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {translateSensorType(sensor.sensor_type)} - {sensor.sensor_id}
+                      </p>
+                      <p className="text-sm text-gray-600">{sensor.location}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-gray-900">
+                        {sensor.value} {sensor.unit}
+                      </p>
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(sensor.status)}`}>
+                        {translateStatus(sensor.status)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        {/* Anomalies */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">Anomalias Pendentes</h3>
-          </div>
-          <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-            {anomalies?.data?.map((anomaly: Anomaly) => (
-              <div key={anomaly.id} className="px-6 py-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">Sensor {anomaly.sensor_id}</p>
-                    <p className="text-sm text-gray-600 mt-1">{translateAnomalyDescription(anomaly.description)}</p>
-                    <p className="text-xs text-gray-500 mt-1">{new Date(anomaly.created_at).toLocaleString("pt-BR")}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
-                      {translateSeverity(anomaly.severity)}
-                    </span>
-                    <button
-                      onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
-                      disabled={isUpdating === Number(anomaly.id)}
-                      className="px-2 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {isUpdating === Number(anomaly.id) ? "..." : "Confirmar"}
-                    </button>
-                    <button
-                      onClick={() => handleAnomalyAction(Number(anomaly.id), "resolve")}
-                      disabled={isUpdating === Number(anomaly.id)}
-                      className="px-2 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {isUpdating === Number(anomaly.id) ? "..." : "Fechar"}
-                    </button>
+          {/* Anomalies */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Anomalias Pendentes</h3>
+            </div>
+            <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+              {anomalies?.data?.map((anomaly: Anomaly) => (
+                <div key={anomaly.id} className="px-6 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">Sensor {anomaly.sensor_id}</p>
+                      <p className="text-sm text-gray-600 mt-1">{translateAnomalyDescription(anomaly.description)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{new Date(anomaly.created_at).toLocaleString("pt-BR")}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(anomaly.severity)}`}>
+                        {translateSeverity(anomaly.severity)}
+                      </span>
+                      <button
+                        onClick={() => handleAnomalyAction(Number(anomaly.id), "confirm")}
+                        disabled={isUpdating === Number(anomaly.id)}
+                        className="px-2 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {isUpdating === Number(anomaly.id) ? "..." : "Confirmar"}
+                      </button>
+                      <button
+                        onClick={() => handleAnomalyAction(Number(anomaly.id), "resolve")}
+                        disabled={isUpdating === Number(anomaly.id)}
+                        className="px-2 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {isUpdating === Number(anomaly.id) ? "..." : "Fechar"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Modal de Observação (RF004) */}
       {showObservationModal && (
@@ -525,7 +610,7 @@ export function MonitoringPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Tipo de Observação
