@@ -26,6 +26,7 @@ import {
   EyeOff,
   MessageCircle
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 interface SupportTicket {
   id: number
@@ -137,6 +138,7 @@ const priorityColors: Record<string, string> = {
 
 export function SupportPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('tickets')
   const [tickets, setTickets] = useState<SupportTicket[]>([])
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeArticle[]>([])
@@ -1084,17 +1086,28 @@ export function SupportPage() {
           ) : (
             /* Ticket Detail View */
             <div className="space-y-6">
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={() => setSelectedTicket(null)}
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  ← Voltar
-                </button>
-                <h2 className="text-xl font-semibold">Ticket #{selectedTicket.ticket_number}</h2>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedTicket.status]}`}>
-                  {translateStatus(selectedTicket.status || '')}
-                </span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => setSelectedTicket(null)}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    ← Voltar
+                  </button>
+                  <h2 className="text-xl font-semibold">Ticket #{selectedTicket.ticket_number}</h2>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedTicket.status]}`}>
+                    {translateStatus(selectedTicket.status || '')}
+                  </span>
+                </div>
+                {user?.role === 'citizen' && (
+                  <button
+                    onClick={() => navigate(`/chat?ticketId=${selectedTicket.id}`)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Conversar sobre este ticket</span>
+                  </button>
+                )}
               </div>
 
               {/* Ticket Info */}

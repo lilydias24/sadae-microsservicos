@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Bot, User, Send, Loader2, MessageSquare, Ticket, Search, X, Wifi, WifiOff } from 'lucide-react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -16,8 +16,21 @@ interface ChatMessage {
   author_name?: string
 }
 
+// Função para traduzir status para português
+const translateStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'open': 'Aberto',
+    'in_progress': 'Em Andamento',
+    'waiting_client': 'Aguardando Cliente',
+    'resolved': 'Resolvido',
+    'closed': 'Fechado'
+  }
+  return statusMap[status] || status
+}
+
 export function ChatPage() {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputMessage, setInputMessage] = useState('')
   const [isTyping, setIsTyping] = useState(false)
@@ -25,6 +38,7 @@ export function ChatPage() {
   const [currentTicketId, setCurrentTicketId] = useState<number | null>(null)
   const [chatHistory, setChatHistory] = useState<Array<{ id: number; title: string; created_at: string }>>([])
   const [showHistory, setShowHistory] = useState(false)
+  const [ticketContext, setTicketContext] = useState<{ title: string; description: string; status: string; ticket_number: string } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   // WebSocket hook
@@ -51,13 +65,28 @@ export function ChatPage() {
     }
   }, [wsMessages, currentTicketId])
 
+  // Load ticket context if ticketId is provided in query params
+  useEffect(() => {
+    const ticketIdParam = searchParams.get('ticketId')
+    if (ticketIdParam && user) {
+      const ticketId = parseInt(ticketIdParam, 10)
+      if (!isNaN(ticketId)) {
+        loadTicketContext(ticketId)
+        setCurrentTicketId(ticketId)
+      }
+    }
+  }, [searchParams, user])
+
   useEffect(() => {
     if (user) {
-      initializeChat()
+      // Only initialize chat if we don't have a ticket context
+      if (!ticketContext && !currentTicketId) {
+        initializeChat()
+      }
       loadChatHistory()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user, ticketContext, currentTicketId])
 
   useEffect(() => {
     scrollToBottom()
@@ -65,6 +94,52 @@ export function ChatPage() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const loadTicketContext = async (ticketId: number) => {
+    setIsLoading(true)
+    try {
+      const { data: ticket } = await api.get(`/support/tickets/${ticketId}`)
+      setTicketContext({
+        title: ticket.title || 'Ticket',
+        description: ticket.description || '',
+        status: ticket.status?.value || ticket.status || 'open',
+        ticket_number: ticket.ticket_number || `#${ticketId}`
+      })
+      // Set current ticket ID
+      setCurrentTicketId(ticketId)
+      
+      // Load existing messages for this ticket
+      const { data: ticketMessages } = await api.get(`/support/tickets/${ticketId}/messages`)
+      if (Array.isArray(ticketMessages) && ticketMessages.length > 0) {
+        const convertedMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
+          id: `msg-${msg.id}`,
+          content: msg.content,
+          sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
+          timestamp: new Date(msg.created_at),
+          ticket_id: msg.ticket_id,
+          author_name: msg.author_name
+        }))
+        setMessages(convertedMessages)
+      } else {
+        // No messages yet, show context message
+        const contextMessage: ChatMessage = {
+          id: `context-${Date.now()}`,
+          content: `📋 **Contexto do Ticket ${ticket.ticket_number}**\n\n**Título:** ${ticket.title}\n**Descrição:** ${ticket.description}\n**Status:** ${ticket.status?.value || ticket.status || 'Aberto'}\n\nComo posso ajudá-lo com este ticket?`,
+          sender: 'bot',
+          timestamp: new Date(),
+          ticket_id: ticketId,
+          author_name: 'Assistente Virtual'
+        }
+        setMessages([contextMessage])
+      }
+    } catch (error) {
+      console.error('Erro ao carregar contexto do ticket:', error)
+      // Fallback to regular chat
+      initializeChat()
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const initializeChat = async () => {
@@ -82,6 +157,14 @@ export function ChatPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const startNewChat = () => {
+    setCurrentTicketId(null)
+    setTicketContext(null)
+    setMessages([])
+    setSearchParams({})
+    initializeChat()
   }
 
   const loadChatHistory = async () => {
@@ -442,7 +525,7 @@ Quer simular o valor da sua próxima fatura?`
       
       // Se não temos ticket e não é chit chat, criar um ticket
       let ticketId = currentTicketId
-      if (!ticketId) {
+      if (!ticketId && !ticketContext) {
         ticketId = await createTicketFromChat(messageToSend)
         if (ticketId) {
           setCurrentTicketId(ticketId)
@@ -531,10 +614,22 @@ Quer simular o valor da sua próxima fatura?`
   const loadTicketMessages = async (ticketId: number) => {
     try {
       setIsLoading(true)
+      
+      // Load ticket context first
+      const { data: ticket } = await api.get(`/support/tickets/${ticketId}`)
+      setTicketContext({
+        title: ticket.title || 'Ticket',
+        description: ticket.description || '',
+        status: ticket.status?.value || ticket.status || 'open',
+        ticket_number: ticket.ticket_number || `#${ticketId}`
+      })
+      setCurrentTicketId(ticketId)
+      
+      // Load existing messages for this ticket
       const { data: ticketMessages } = await api.get(`/support/tickets/${ticketId}/messages`)
       
       // Garantir que ticketMessages seja sempre um array
-      if (Array.isArray(ticketMessages)) {
+      if (Array.isArray(ticketMessages) && ticketMessages.length > 0) {
         const chatMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
           id: `msg-${msg.id}`,
           content: msg.content,
@@ -545,15 +640,25 @@ Quer simular o valor da sua próxima fatura?`
         }))
 
         setMessages(chatMessages)
-        setCurrentTicketId(ticketId)
         setShowHistory(false)
       } else {
-        setMessages([])
-        console.warn('Resposta da API não é um array:', ticketMessages)
+        // No messages yet, show context message
+        const statusText = ticket.status?.value || ticket.status || 'Aberto'
+        const contextMessage: ChatMessage = {
+          id: `context-${Date.now()}`,
+          content: `📋 **Contexto do Ticket ${ticket.ticket_number}**\n\n**Título:** ${ticket.title}\n**Descrição:** ${ticket.description}\n**Status:** ${statusText}\n\nComo posso ajudá-lo com este ticket?`,
+          sender: 'bot',
+          timestamp: new Date(),
+          ticket_id: ticketId,
+          author_name: 'Assistente Virtual'
+        }
+        setMessages([contextMessage])
+        setShowHistory(false)
       }
     } catch (error) {
       console.error('Erro ao carregar mensagens do ticket:', error)
       setMessages([])
+      setTicketContext(null)
     } finally {
       setIsLoading(false)
     }
@@ -575,8 +680,7 @@ Quer simular o valor da sua próxima fatura?`
         <div className="p-4 space-y-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
           <button
             onClick={() => {
-              initializeChat()
-              setCurrentTicketId(null)
+              startNewChat()
               setShowHistory(false)
             }}
             className="w-full p-3 text-left bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors flex items-center space-x-2"
@@ -620,9 +724,13 @@ Quer simular o valor da sua próxima fatura?`
               <Bot className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Atendimento SADAE</h3>
+              <h3 className="font-semibold text-gray-900">
+                {ticketContext ? `Ticket ${ticketContext.ticket_number}` : 'Atendimento SADAE'}
+              </h3>
               <div className="flex items-center space-x-2">
-                <p className="text-xs text-gray-500">Assistente Virtual</p>
+                <p className="text-xs text-gray-500">
+                  {ticketContext ? 'Conversando sobre ticket' : 'Assistente Virtual'}
+                </p>
                 {currentTicketId && (
                   <>
                     {wsConnected ? (
@@ -635,13 +743,45 @@ Quer simular o valor da sua próxima fatura?`
               </div>
             </div>
           </div>
-          {currentTicketId && (
-            <div className="flex items-center space-x-2 text-sm text-gray-600">
-              <Ticket className="w-4 h-4" />
-              <span>Ticket #{currentTicketId}</span>
-            </div>
-          )}
+          <div className="flex items-center space-x-2">
+            {ticketContext && (
+              <div className="flex items-center space-x-2 text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">
+                <Ticket className="w-4 h-4" />
+                <span>{ticketContext.ticket_number}</span>
+              </div>
+            )}
+            {ticketContext && (
+              <button
+                onClick={startNewChat}
+                className="text-sm text-gray-600 hover:text-gray-900 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                title="Iniciar nova conversa"
+              >
+                Nova Conversa
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Contexto do Ticket */}
+        {ticketContext && (
+          <div className="bg-blue-50 border-b border-blue-200 p-4">
+            <div className="max-w-4xl mx-auto">
+              <div className="flex items-start space-x-3">
+                <Ticket className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <h4 className="font-semibold text-blue-900">{ticketContext.ticket_number}</h4>
+                    <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                      {translateStatus(ticketContext.status)}
+                    </span>
+                  </div>
+                  <h5 className="font-medium text-gray-900 mb-1">{ticketContext.title}</h5>
+                  <p className="text-sm text-gray-700 line-clamp-2">{ticketContext.description}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Mensagens */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
