@@ -525,6 +525,11 @@ async def create_team(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome da equipe já existe")
     
+    # Serialize lists to JSON strings for database storage
+    import json
+    work_areas_json = json.dumps(team_data.work_areas) if team_data.work_areas else json.dumps([])
+    equipment_json = json.dumps(team_data.equipment) if team_data.equipment else json.dumps([])
+    
     team = Team(
         name=team_data.name,
         description=team_data.description,
@@ -533,15 +538,36 @@ async def create_team(
         max_concurrent_orders=team_data.max_concurrent_orders,
         supervisor_name=team_data.supervisor_name,
         supervisor_contact=team_data.supervisor_contact,
-        work_areas=team_data.work_areas,
-        equipment=team_data.equipment
+        work_areas=work_areas_json,
+        equipment=equipment_json
     )
     
     db.add(team)
     db.commit()
     db.refresh(team)
     
-    return team
+    # Deserialize for response
+    team_dict = {
+        "id": team.id,
+        "name": team.name,
+        "description": team.description,
+        "specialization": team.specialization,
+        "members_count": team.members_count,
+        "max_concurrent_orders": team.max_concurrent_orders,
+        "supervisor_name": team.supervisor_name,
+        "supervisor_contact": team.supervisor_contact,
+        "is_active": team.is_active,
+        "current_workload": team.current_workload,
+        "work_areas": json.loads(team.work_areas) if team.work_areas else [],
+        "equipment": json.loads(team.equipment) if team.equipment else [],
+        "performance_rating": team.performance_rating,
+        "completed_orders": team.completed_orders,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+        "members": None
+    }
+    
+    return team_dict
 
 @router.put("/teams/{team_id}", response_model=TeamResponse)
 async def update_team(
@@ -559,12 +585,43 @@ async def update_team(
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipe não encontrada")
     
-    for field, value in team_update.dict(exclude_unset=True).items():
+    import json
+    update_data = team_update.dict(exclude_unset=True)
+    
+    # Serialize lists to JSON strings
+    if "work_areas" in update_data and update_data["work_areas"] is not None:
+        update_data["work_areas"] = json.dumps(update_data["work_areas"])
+    if "equipment" in update_data and update_data["equipment"] is not None:
+        update_data["equipment"] = json.dumps(update_data["equipment"])
+    
+    for field, value in update_data.items():
         setattr(team, field, value)
     team.updated_at = datetime.now()
     db.commit()
     db.refresh(team)
-    return team
+    
+    # Deserialize for response
+    team_dict = {
+        "id": team.id,
+        "name": team.name,
+        "description": team.description,
+        "specialization": team.specialization,
+        "members_count": team.members_count,
+        "max_concurrent_orders": team.max_concurrent_orders,
+        "supervisor_name": team.supervisor_name,
+        "supervisor_contact": team.supervisor_contact,
+        "is_active": team.is_active,
+        "current_workload": team.current_workload,
+        "work_areas": json.loads(team.work_areas) if team.work_areas else [],
+        "equipment": json.loads(team.equipment) if team.equipment else [],
+        "performance_rating": team.performance_rating,
+        "completed_orders": team.completed_orders,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+        "members": None
+    }
+    
+    return team_dict
 
 @router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
 async def list_team_members(
@@ -673,13 +730,22 @@ async def get_teams(
                 "available" if team.is_active and current_workload < (team.max_concurrent_orders or 0) else "busy"
             )
             
-            # Fix work_areas and equipment if they are PostgreSQL array strings
+            # Fix work_areas and equipment if they are JSON strings
+            import json
             if isinstance(team.work_areas, str):
-                # Convert PostgreSQL array string like '{string}' to Python list
-                team.work_areas = team.work_areas.strip('{}').split(',') if team.work_areas and team.work_areas != '{}' else []
+                try:
+                    parsed = json.loads(team.work_areas) if team.work_areas else []
+                    # Ensure it's a list, not a dict
+                    team.work_areas = parsed if isinstance(parsed, list) else []
+                except:
+                    team.work_areas = []
             if isinstance(team.equipment, str):
-                # Convert PostgreSQL array string like '{teste}' to Python list
-                team.equipment = team.equipment.strip('{}').split(',') if team.equipment and team.equipment != '{}' else []
+                try:
+                    parsed = json.loads(team.equipment) if team.equipment else []
+                    # Ensure it's a list, not a dict
+                    team.equipment = parsed if isinstance(parsed, list) else []
+                except:
+                    team.equipment = []
             
             members = db.query(TeamMember).filter(TeamMember.team_id == team.id, TeamMember.is_active == True).all()
             # Attach simple members list for response
