@@ -589,7 +589,7 @@ export function MaintenancePage() {
               Nenhuma ordem de serviço encontrada.
             </div>
           ) : viewMode === "kanban" ? (
-            <ServiceOrderKanban orders={workOrders} onOrderClick={openOrderDetail} />
+            <ServiceOrderKanban orders={workOrders} teams={teams} onOrderClick={openOrderDetail} />
           ) : (
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <div className="divide-y divide-gray-200">

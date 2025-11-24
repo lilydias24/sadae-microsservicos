@@ -16,6 +16,14 @@ interface WorkOrder {
   estimated_duration: number
 }
 
+interface Team {
+  id: string
+  name: string
+  is_active?: boolean
+  current_workload?: number
+  max_concurrent_orders?: number
+}
+
 interface KanbanColumn {
   id: string
   title: string
@@ -26,6 +34,7 @@ interface KanbanColumn {
 
 interface ServiceOrderKanbanProps {
   orders: WorkOrder[]
+  teams: Team[]
   onOrderClick: (order: WorkOrder) => void
 }
 
@@ -60,7 +69,7 @@ const COLUMNS: KanbanColumn[] = [
   }
 ]
 
-export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanProps) {
+export function ServiceOrderKanban({ orders, teams, onOrderClick }: ServiceOrderKanbanProps) {
   const queryClient = useQueryClient()
   const [draggedOrder, setDraggedOrder] = useState<WorkOrder | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
@@ -72,6 +81,32 @@ export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanP
       queryClient.invalidateQueries({ queryKey: ['workOrders'] })
     }
   })
+
+  const assignTeamMutation = useMutation({
+    mutationFn: ({ orderId, teamName }: { orderId: number; teamName: string }) =>
+      maintenanceDev.assignWorkOrder(orderId, teamName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+      queryClient.invalidateQueries({ queryKey: ['teams'] })
+    }
+  })
+
+  const handleAssignTeam = (e: React.ChangeEvent<HTMLSelectElement>, orderId: string) => {
+    e.stopPropagation() // Previne abrir o modal
+    const teamName = e.target.value
+    if (teamName) {
+      assignTeamMutation.mutate({
+        orderId: parseInt(orderId),
+        teamName
+      })
+    }
+  }
+
+  // Filtrar equipes disponíveis (ativas e com capacidade)
+  const availableTeams = teams.filter(team => 
+    team.is_active && 
+    (team.current_workload || 0) < (team.max_concurrent_orders || 5)
+  )
 
   const handleDragStart = (e: React.DragEvent, order: WorkOrder) => {
     setDraggedOrder(order)
@@ -241,6 +276,25 @@ export function ServiceOrderKanban({ orders, onOrderClick }: ServiceOrderKanbanP
                       <p className="text-gray-600 text-xs mb-3 line-clamp-2">
                         {order.description}
                       </p>
+
+                      {/* Team Assignment Dropdown (only for open orders) */}
+                      {order.status === "open" && !order.assigned_team && availableTeams.length > 0 && (
+                        <div className="mb-3" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            onChange={(e) => handleAssignTeam(e, order.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:bg-gray-50 transition-colors"
+                            defaultValue=""
+                          >
+                            <option value="" disabled>Atribuir equipe...</option>
+                            {availableTeams.map((team) => (
+                              <option key={team.id} value={team.name}>
+                                {team.name} ({team.current_workload || 0}/{team.max_concurrent_orders || 5})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       {/* Footer Info */}
                       <div className="space-y-2 text-xs text-gray-500">
