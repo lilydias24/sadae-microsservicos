@@ -1030,9 +1030,14 @@ async def create_service_order_from_anomaly(
     Create service order from monitoring anomaly
     Automatically suggests best team specialization based on sensor type
     """
+    print(f"🔐 create_service_order_from_anomaly: Recebido token: {credentials.credentials[:30]}...")
+    print(f"📋 Anomaly data: {anomaly_data}")
+    
     user = await verify_user_token(f"Bearer {credentials.credentials}")
+    print(f"👤 User autenticado: {user}")
     
     if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
+        print(f"❌ Permissão negada para role: {user.get('role')}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Apenas gerentes de manutenção e operadores podem criar ordens de serviço"
@@ -1053,19 +1058,43 @@ async def create_service_order_from_anomaly(
     # Generate protocol number
     protocol_number = generate_protocol_number()
     
+    # Traduzir tipo de sensor
+    sensor_type_translations = {
+        "pressure": "Pressão",
+        "flow": "Vazão",
+        "water_quality": "Qualidade da Água",
+        "precipitation": "Precipitação",
+        "river_level": "Nível do Rio"
+    }
+    sensor_type_pt = sensor_type_translations.get(anomaly_data.sensor_type, anomaly_data.sensor_type)
+    
+    # Criar descrição detalhada e legível
+    description = f"""🚨 ANOMALIA DETECTADA - Sistema de Monitoramento
+
+📍 LOCALIZAÇÃO
+{anomaly_data.location}
+
+🔧 DETALHES DO SENSOR
+• ID: {anomaly_data.sensor_id}
+• Tipo: {sensor_type_pt}
+
+📊 MEDIÇÕES
+• Valor atual: {anomaly_data.value}
+• Limite configurado: {anomaly_data.threshold_value}
+• Status: Fora dos parâmetros normais
+
+⚠️ DESCRIÇÃO
+{anomaly_data.description}
+
+👥 RECOMENDAÇÃO
+Especialização sugerida: {suggested_specialization}
+
+Esta ordem de serviço foi gerada automaticamente pelo sistema de monitoramento em tempo real."""
+    
     # Create service order
     service_order = ServiceOrder(
-        title=f"Anomalia detectada - {anomaly_data.sensor_id}",
-        description=f"""Anomalia detectada pelo sistema de monitoramento:
-
-Sensor: {anomaly_data.sensor_id}
-Tipo: {anomaly_data.sensor_type}
-Localização: {anomaly_data.location}
-Valor medido: {anomaly_data.value}
-Limite: {anomaly_data.threshold_value}
-Descrição: {anomaly_data.description}
-
-Especialização sugerida: {suggested_specialization}""",
+        title=f"Anomalia: {sensor_type_pt} - {anomaly_data.location}",
+        description=description,
         priority=priority,
         location=anomaly_data.location,
         anomaly_id=anomaly_data.anomaly_id,

@@ -220,6 +220,12 @@ export function MonitoringPage() {
       return
     }
 
+    // Verificar token
+    const token = localStorage.getItem("token")
+    console.log("🔐 Token disponível:", !!token, token ? token.substring(0, 30) + "..." : "null")
+    console.log("👤 User role:", user.role)
+    console.log("📋 Anomaly data:", anomaly)
+
     try {
       setIsUpdating(Number(anomaly.id))
       
