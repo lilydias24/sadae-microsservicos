@@ -490,7 +490,7 @@ async def rate_ticket(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Rate ticket satisfaction"""
+    """Rate ticket satisfaction - only once per ticket"""
     user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
@@ -505,12 +505,24 @@ async def rate_ticket(
     if ticket.status not in [TicketStatus.RESOLVED, TicketStatus.CLOSED]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket deve estar resolvido ou fechado")
     
+    # Check if ticket already has a rating (only allow one evaluation per ticket)
+    if ticket.satisfaction_rating is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Este ticket já foi avaliado. Cada ticket só pode ser avaliado uma vez."
+        )
+    
     ticket.satisfaction_rating = satisfaction_data.satisfaction_rating
     ticket.satisfaction_comment = satisfaction_data.satisfaction_comment
     
     db.commit()
+    db.refresh(ticket)
     
-    return {"message": "Avaliação registrada com sucesso"}
+    return {
+        "message": "Avaliação registrada com sucesso",
+        "satisfaction_rating": ticket.satisfaction_rating,
+        "satisfaction_comment": ticket.satisfaction_comment
+    }
 
 # ==================== TICKET MESSAGES ====================
 

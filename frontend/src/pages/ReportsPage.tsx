@@ -233,9 +233,9 @@ export function ReportsPage() {
       doc.setFontSize(fontSize)
       doc.setTextColor(color[0], color[1], color[2])
       if (isBold) {
-        doc.setFont(undefined, 'bold')
+        doc.setFont('helvetica', 'bold')
       } else {
-        doc.setFont(undefined, 'normal')
+        doc.setFont('helvetica', 'normal')
       }
       
       const lines = doc.splitTextToSize(text, maxWidth - xOffset)
@@ -254,7 +254,7 @@ export function ReportsPage() {
       doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 8, 'F')
       doc.setTextColor(255, 255, 255)
       doc.setFontSize(12)
-      doc.setFont(undefined, 'bold')
+      doc.setFont('helvetica', 'bold')
       doc.text(title, margin + 5, yPosition + 4)
       yPosition += 10
       doc.setTextColor(0, 0, 0)
@@ -265,12 +265,12 @@ export function ReportsPage() {
     doc.rect(0, 0, pageWidth, 45, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(22)
-    doc.setFont(undefined, 'bold')
+    doc.setFont('helvetica', 'bold')
     doc.text('SADAE', pageWidth / 2, 18, { align: 'center' })
     doc.setFontSize(12)
     doc.text('Sistema de Análise de Dados de Abastecimento e Esgoto', pageWidth / 2, 28, { align: 'center' })
     doc.setFontSize(14)
-    doc.setFont(undefined, 'bold')
+    doc.setFont('helvetica', 'bold')
     doc.text('RELATÓRIO GERADO', pageWidth / 2, 38, { align: 'center' })
     
     yPosition = 55
@@ -283,10 +283,10 @@ export function ReportsPage() {
     yPosition += 6
     
     doc.setFontSize(11)
-    doc.setFont(undefined, 'bold')
+    doc.setFont('helvetica', 'bold')
     doc.setTextColor(37, 99, 235)
     doc.text('ID do Relatório:', margin + 5, yPosition)
-    doc.setFont(undefined, 'normal')
+    doc.setFont('helvetica', 'normal')
     doc.setTextColor(0, 0, 0)
     doc.text(generatedReport.report_id || 'N/A', margin + 50, yPosition)
     yPosition += 6
@@ -307,19 +307,19 @@ export function ReportsPage() {
           minute: '2-digit'
         })
     
-    doc.setFont(undefined, 'bold')
+    doc.setFont('helvetica', 'bold')
     doc.setTextColor(100, 100, 100)
     doc.text('Gerado em:', margin + 5, yPosition)
-    doc.setFont(undefined, 'normal')
+    doc.setFont('helvetica', 'normal')
     doc.setTextColor(0, 0, 0)
     doc.text(generatedDate, margin + 50, yPosition)
     yPosition += 6
 
     if (generatedReport.generated_by) {
-      doc.setFont(undefined, 'bold')
+      doc.setFont('helvetica', 'bold')
       doc.setTextColor(100, 100, 100)
       doc.text('Gerado por:', margin + 5, yPosition)
-      doc.setFont(undefined, 'normal')
+      doc.setFont('helvetica', 'normal')
       doc.setTextColor(0, 0, 0)
       doc.text(generatedReport.generated_by, margin + 50, yPosition)
     }
@@ -379,12 +379,12 @@ export function ReportsPage() {
         doc.rect(margin, cardY, pageWidth - (margin * 2), 12, 'FD')
         
         doc.setFontSize(9)
-        doc.setFont(undefined, 'bold')
+        doc.setFont('helvetica', 'bold')
         doc.setTextColor(37, 99, 235)
         doc.text(label, margin + 5, yPosition + 3)
         
         doc.setFontSize(11)
-        doc.setFont(undefined, 'bold')
+        doc.setFont('helvetica', 'bold')
         doc.setTextColor(0, 0, 0)
         doc.text(String(displayValue), pageWidth - margin - 5, yPosition + 3, { align: 'right' })
         
@@ -401,13 +401,13 @@ export function ReportsPage() {
         doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 18, 'FD')
         
         doc.setFontSize(10)
-        doc.setFont(undefined, 'bold')
+        doc.setFont('helvetica', 'bold')
         doc.setTextColor(37, 99, 235)
         doc.text('Período de Análise', margin + 5, yPosition + 4)
         
         yPosition += 6
         doc.setFontSize(9)
-        doc.setFont(undefined, 'normal')
+        doc.setFont('helvetica', 'normal')
         doc.setTextColor(0, 0, 0)
         
         if (generatedReport.summary.period.start) {
@@ -478,10 +478,10 @@ export function ReportsPage() {
           }
           
           doc.setFontSize(9)
-          doc.setFont(undefined, 'bold')
+          doc.setFont('helvetica', 'bold')
           doc.setTextColor(100, 100, 100)
           doc.text(`${label}:`, margin + 5, yPosition + 3)
-          doc.setFont(undefined, 'normal')
+          doc.setFont('helvetica', 'normal')
           doc.setTextColor(0, 0, 0)
           doc.text(String(displayValue), margin + 60, yPosition + 3)
           yPosition += 8
@@ -508,7 +508,7 @@ export function ReportsPage() {
         doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 8, 'FD')
         
         doc.setFontSize(10)
-        doc.setFont(undefined, 'bold')
+        doc.setFont('helvetica', 'bold')
         doc.setTextColor(37, 99, 235)
         doc.text(`Registro ${index + 1}`, margin + 5, yPosition + 3)
         yPosition += 10
@@ -575,10 +575,10 @@ export function ReportsPage() {
           }
           
           doc.setFontSize(8)
-          doc.setFont(undefined, 'bold')
+          doc.setFont('helvetica', 'bold')
           doc.setTextColor(100, 100, 100)
           doc.text(`${label}:`, margin + 10, yPosition)
-          doc.setFont(undefined, 'normal')
+          doc.setFont('helvetica', 'normal')
           doc.setTextColor(0, 0, 0)
           const valueText = String(displayValue).substring(0, 60) // Limit length
           doc.text(valueText, margin + 50, yPosition)
@@ -600,7 +600,7 @@ export function ReportsPage() {
         checkNewPage(10)
         doc.setFontSize(9)
         doc.setTextColor(128, 128, 128)
-        doc.setFont(undefined, 'italic')
+        doc.setFont('helvetica', 'italic')
         addText(`Nota: Exibindo apenas os primeiros 30 de ${data.length} registro(s). Consulte o arquivo JSON para todos os dados completos.`, 9, false, [128, 128, 128])
       }
     }
@@ -617,7 +617,7 @@ export function ReportsPage() {
       
       doc.setFontSize(8)
       doc.setTextColor(128, 128, 128)
-      doc.setFont(undefined, 'normal')
+      doc.setFont('helvetica', 'normal')
       doc.text(
         `Página ${i} de ${totalPages} | SADAE - Sistema de Análise de Dados`,
         pageWidth / 2,

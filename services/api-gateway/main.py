@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import httpx
 import os
 import sys
+import json
 
 # Add shared modules to path
 sys.path.append('/app/shared')
@@ -896,6 +897,54 @@ async def create_ticket_message(ticket_id: int, request: Request, credentials: H
             }
         )
         return response.json()
+
+@app.post("/support/tickets/{ticket_id}/evaluate")
+async def evaluate_ticket(ticket_id: int, request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Evaluate ticket (alias for /satisfaction)"""
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    body_str = body.decode('utf-8') if body else '{}'
+    
+    # Parse and transform the request body
+    try:
+        data = json.loads(body_str)
+        # Transform evaluationForm format to satisfaction format
+        satisfaction_data = {
+            "satisfaction_rating": data.get("rating", data.get("satisfaction_rating", 5)),
+            "satisfaction_comment": data.get("comment", data.get("satisfaction_comment", ""))
+        }
+        body = json.dumps(satisfaction_data).encode('utf-8')
+    except:
+        pass  # If parsing fails, send as is
+    
+    core_url = service_registry.get_service_url('core')
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{core_url}/support/tickets/{ticket_id}/satisfaction",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        
+        if response.status_code >= 400:
+            error_detail = parse_error_detail(response)
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"detail": error_detail},
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                }
+            )
+        
+        result = response.json() if response.text else {}
+        return add_cors_headers(result)
 
 @app.get("/support/knowledge-base")
 async def get_knowledge_base(category: str = None, featured_only: bool = False):
