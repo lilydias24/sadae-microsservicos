@@ -129,8 +129,7 @@ const translateStatus = (status: string = 'normal'): string => {
 
 export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProps) {
     const [zoom, setZoom] = useState(13)
-    const [showNetworkSensors, setShowNetworkSensors] = useState(true)
-    const [showSmartMeters, setShowSmartMeters] = useState(true)
+    const [activeLayer, setActiveLayer] = useState<'sensors' | 'smartMeters' | 'none'>('sensors')
     const [showLayerControl, setShowLayerControl] = useState(false)
 
     // Filter sensors that have coordinates
@@ -147,7 +146,11 @@ export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProp
             <MapContainer
                 center={defaultCenter}
                 zoom={13}
-                style={{ height: '100%', width: '100%', borderRadius: '0.5rem' }}
+                style={{
+                    height: '100%',
+                    width: '100%',
+                    borderRadius: '0.5rem'
+                }}
                 className="z-0"
             >
                 <TileLayer
@@ -159,7 +162,7 @@ export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProp
                 <AutoFitBounds sensors={sensorsWithCoords} />
 
                 {/* Network Sensors Layer */}
-                {showNetworkSensors && sensorsWithCoords.map((sensor) => (
+                {activeLayer === 'sensors' && sensorsWithCoords.map((sensor) => (
                     <Marker
                         key={sensor.sensor_id}
                         position={[sensor.latitude!, sensor.longitude!]}
@@ -204,7 +207,7 @@ export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProp
                 ))}
 
                 {/* Smart Meters Layer */}
-                {showSmartMeters && meterClusters.map((cluster, idx) => (
+                {activeLayer === 'smartMeters' && meterClusters.map((cluster, idx) => (
                     <SmartMeterClusterMarker key={`cluster-${idx}`} cluster={cluster} />
                 ))}
             </MapContainer>
@@ -225,29 +228,40 @@ export function DigitalTwinMap({ sensors, smartMeters = [] }: DigitalTwinMapProp
                     <div className="space-y-2">
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
-                                type="checkbox"
-                                checked={showNetworkSensors}
-                                onChange={(e) => setShowNetworkSensors(e.target.checked)}
-                                className="w-4 h-4"
+                                type="radio"
+                                name="layer-control"
+                                checked={activeLayer === 'sensors'}
+                                onChange={() => setActiveLayer('sensors')}
+                                className="w-4 h-4 text-blue-600"
                             />
                             <span className="text-sm">Sensores de Rede</span>
-                            {showNetworkSensors ? (
+                            {activeLayer === 'sensors' && (
                                 <Eye className="w-4 h-4 ml-auto text-blue-600" />
-                            ) : (
-                                <EyeOff className="w-4 h-4 ml-auto text-gray-400" />
                             )}
                         </label>
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
-                                type="checkbox"
-                                checked={showSmartMeters}
-                                onChange={(e) => setShowSmartMeters(e.target.checked)}
-                                className="w-4 h-4"
+                                type="radio"
+                                name="layer-control"
+                                checked={activeLayer === 'smartMeters'}
+                                onChange={() => setActiveLayer('smartMeters')}
+                                className="w-4 h-4 text-blue-600"
                             />
                             <span className="text-sm">Hidrômetros ({smartMeters.length})</span>
-                            {showSmartMeters ? (
+                            {activeLayer === 'smartMeters' && (
                                 <Eye className="w-4 h-4 ml-auto text-blue-600" />
-                            ) : (
+                            )}
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="layer-control"
+                                checked={activeLayer === 'none'}
+                                onChange={() => setActiveLayer('none')}
+                                className="w-4 h-4 text-gray-400"
+                            />
+                            <span className="text-sm text-gray-600">Ocultar Camadas</span>
+                            {activeLayer === 'none' && (
                                 <EyeOff className="w-4 h-4 ml-auto text-gray-400" />
                             )}
                         </label>
