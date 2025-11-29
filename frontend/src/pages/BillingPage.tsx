@@ -3,20 +3,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import { useAuth } from "../contexts/AuthContext"
-import { 
-  Card, 
-  CardHeader, 
-  CardContent, 
-  Button, 
-  Badge, 
-  Modal, 
-  Input, 
+import {
+  Card,
+  CardHeader,
+  CardContent,
+  Button,
+  Badge,
+  Modal,
+  Input,
   Skeleton,
-  TableSkeleton 
+  TableSkeleton
 } from "../components/ui"
 import { formatCurrency, formatDate, getStatusColor, getStatusText } from "../utils/cn"
 import { BillListSkeleton, StatCardSkeleton } from "../components/billing/BillingSkeleton"
 import dataService, { type Bill, type BillDispute, type DebtNegotiation } from "../services/dataService"
+import { generateBillPDF } from "../utils/pdfGenerator"
 
 export function BillingPage() {
   const { user } = useAuth()
@@ -30,13 +31,13 @@ export function BillingPage() {
   const [showDisputeDetails, setShowDisputeDetails] = useState(false)
   const [showNegotiationDetails, setShowNegotiationDetails] = useState(false)
   const [disputeReason, setDisputeReason] = useState("")
-  
+
   // Novos modais melhorados
   const [showResolveDispute, setShowResolveDispute] = useState(false)
   const [showCreateNegotiation, setShowCreateNegotiation] = useState(false)
   const [resolutionText, setResolutionText] = useState("")
   const [resolutionType, setResolutionType] = useState<"approve" | "reject" | null>(null)
-  
+
   // Estados para nova negociação
   const [newNegotiation, setNewNegotiation] = useState({
     customerId: "",
@@ -46,7 +47,7 @@ export function BillingPage() {
     interestRate: "",
     description: ""
   })
-  
+
   // Filtros
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -79,17 +80,17 @@ export function BillingPage() {
   // Memoized filtered and sorted bills
   const filteredBills = useMemo(() => {
     if (!bills) return []
-    
+
     let filtered = bills.filter((bill: Bill) => {
       const matchesSearch = bill.id.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = statusFilter === "all" || bill.status === statusFilter
-      
+
       // Date filter
       let matchesDate = true
       if (dateFilter !== "all") {
         const billDate = new Date(bill.due_date)
         const now = new Date()
-        
+
         switch (dateFilter) {
           case "thisMonth":
             matchesDate = billDate.getMonth() === now.getMonth() && billDate.getFullYear() === now.getFullYear()
@@ -107,7 +108,7 @@ export function BillingPage() {
             break
         }
       }
-      
+
       // Amount filter
       let matchesAmount = true
       if (amountFilter !== "all") {
@@ -123,14 +124,14 @@ export function BillingPage() {
             break
         }
       }
-      
+
       return matchesSearch && matchesStatus && matchesDate && matchesAmount
     })
-    
+
     // Sort bills
     filtered.sort((a: Bill, b: Bill) => {
       let comparison = 0
-      
+
       switch (sortBy) {
         case "date":
           comparison = new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
@@ -142,20 +143,21 @@ export function BillingPage() {
           comparison = a.status.localeCompare(b.status)
           break
       }
-      
+
       return sortOrder === "asc" ? comparison : -comparison
     })
-    
+
     return filtered
   }, [bills, searchTerm, statusFilter, sortBy, sortOrder, dateFilter, amountFilter])
 
   // Statistics
-    const statistics = useMemo(() => {
+  const statistics = useMemo(() => {
     if (!bills) return { total: 0, pending: 0, overdue: 0, paid: 0, totalAmount: 0 }
 
-    return bills.reduce((acc: any, bill: Bill) => {      acc.total++
+    return bills.reduce((acc: any, bill: Bill) => {
+      acc.total++
       acc.totalAmount += bill.amount
-      
+
       switch (bill.status) {
         case "pending":
           acc.pending++
@@ -167,11 +169,11 @@ export function BillingPage() {
           acc.paid++
           break
       }
-      
+
       return acc
     }, { total: 0, pending: 0, overdue: 0, paid: 0, totalAmount: 0 })
   }, [bills])
-    // Create dispute mutation
+  // Create dispute mutation
   const createDisputeMutation = useMutation({
     mutationFn: (disputeData: { bill_id: string; reason: string }) => api.post("/billing/disputes", disputeData),
     onSuccess: () => {
@@ -184,7 +186,7 @@ export function BillingPage() {
 
   // Process payment mutation
   const processPaymentMutation = useMutation({
-    mutationFn: (billId: string) => api.post(`/billing/bills/${billId}/pay`),
+    mutationFn: (billId: string) => dataService.payBill(billId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bills"] })
     },
@@ -311,7 +313,7 @@ export function BillingPage() {
               : "Gerencie faturas, contestações e negociações de débito"}
           </p>
         </div>
-        
+
         {/* Search and Filters */}
         <div className="space-y-4">
           <div className="flex flex-col lg:flex-row gap-3">
@@ -339,7 +341,7 @@ export function BillingPage() {
               {showAdvancedFilters ? "Menos filtros" : "Mais filtros"}
             </Button>
           </div>
-          
+
           {showAdvancedFilters && (
             <Card className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -359,7 +361,7 @@ export function BillingPage() {
                     <option value="overdue">Vencidas</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Valor
@@ -375,7 +377,7 @@ export function BillingPage() {
                     <option value="high">Acima de R$ 150</option>
                   </select>
                 </div>
-                
+
                 <div className="flex items-end">
                   <Button
                     variant="secondary"
@@ -394,7 +396,7 @@ export function BillingPage() {
                   </Button>
                 </div>
               </div>
-              
+
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="flex flex-wrap gap-2">
                   {searchTerm && (
@@ -421,10 +423,10 @@ export function BillingPage() {
                   )}
                   {dateFilter !== "all" && (
                     <Badge variant="info" className="flex items-center gap-1">
-                      Período: {dateFilter === "thisMonth" ? "Este mês" : 
-                               dateFilter === "lastMonth" ? "Mês passado" :
-                               dateFilter === "last3Months" ? "Últimos 3 meses" :
-                               dateFilter === "overdue" ? "Vencidas" : dateFilter}
+                      Período: {dateFilter === "thisMonth" ? "Este mês" :
+                        dateFilter === "lastMonth" ? "Mês passado" :
+                          dateFilter === "last3Months" ? "Últimos 3 meses" :
+                            dateFilter === "overdue" ? "Vencidas" : dateFilter}
                       <button
                         onClick={() => setDateFilter("all")}
                         className="ml-1 hover:text-blue-800"
@@ -436,8 +438,8 @@ export function BillingPage() {
                   {amountFilter !== "all" && (
                     <Badge variant="info" className="flex items-center gap-1">
                       Valor: {amountFilter === "low" ? "Até R$ 50" :
-                              amountFilter === "medium" ? "R$ 50-150" :
-                              amountFilter === "high" ? "Acima R$ 150" : amountFilter}
+                        amountFilter === "medium" ? "R$ 50-150" :
+                          amountFilter === "high" ? "Acima R$ 150" : amountFilter}
                       <button
                         onClick={() => setAmountFilter("all")}
                         className="ml-1 hover:text-blue-800"
@@ -531,11 +533,10 @@ export function BillingPage() {
                     setActiveTab(tab.id as any)
                   }
                 }}
-                className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === tab.id
-                    ? "border-blue-500 text-blue-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+                className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id
+                  ? "border-blue-500 text-blue-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  }`}
               >
                 <span>{tab.icon}</span>
                 <span>{tab.name}</span>
@@ -558,7 +559,7 @@ export function BillingPage() {
                   {user?.role === "citizen" ? "Suas Faturas" : "Todas as Faturas"}
                 </h3>
                 <p className="text-sm text-gray-600 mt-1">
-                  {filteredBills.length === bills?.length 
+                  {filteredBills.length === bills?.length
                     ? `${filteredBills.length} faturas encontradas`
                     : `${filteredBills.length} de ${bills?.length || 0} faturas (filtradas)`
                   }
@@ -584,7 +585,7 @@ export function BillingPage() {
               </div>
             </div>
           </CardHeader>
-          
+
           <CardContent>
             {filteredBills.length === 0 ? (
               <div className="text-center py-16">
@@ -631,7 +632,7 @@ export function BillingPage() {
                             {getStatusText(bill.status)}
                           </Badge>
                         </div>
-                        
+
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-gray-600">
                           <div className="flex items-center space-x-2">
                             <span>💰</span>
@@ -646,12 +647,12 @@ export function BillingPage() {
                             <span>Vence em {formatDate(bill.due_date)}</span>
                           </div>
                         </div>
-                        
+
                         <div className="mt-2 text-xs text-gray-500">
                           Período: {formatDate(bill.period_start)} - {formatDate(bill.period_end)}
                         </div>
                       </div>
-                      
+
                       <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-2">
                         {user?.role === "citizen" && bill.status === "pending" && (
                           <>
@@ -677,8 +678,8 @@ export function BillingPage() {
                             </Button>
                           </>
                         )}
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
                           className="w-full sm:w-auto"
                           onClick={() => {
@@ -745,8 +746,8 @@ export function BillingPage() {
                       </div>
                       {dispute.status === "pending" && user?.role !== "citizen" && (
                         <div className="flex items-center space-x-2 ml-4">
-                          <Button 
-                            variant="success" 
+                          <Button
+                            variant="success"
                             size="sm"
                             onClick={() => {
                               setSelectedDispute(dispute)
@@ -756,8 +757,8 @@ export function BillingPage() {
                           >
                             Aprovar
                           </Button>
-                          <Button 
-                            variant="danger" 
+                          <Button
+                            variant="danger"
                             size="sm"
                             onClick={() => {
                               setSelectedDispute(dispute)
@@ -769,8 +770,8 @@ export function BillingPage() {
                           </Button>
                         </div>
                       )}
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => {
                           setSelectedDispute(dispute)
@@ -800,7 +801,7 @@ export function BillingPage() {
                 </p>
               </div>
               {user?.role !== "citizen" && (
-                <Button 
+                <Button
                   onClick={() => setShowCreateNegotiation(true)}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
@@ -849,8 +850,8 @@ export function BillingPage() {
                           </div>
                         </div>
                       </div>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => {
                           setSelectedNegotiation(negotiation)
@@ -903,7 +904,7 @@ export function BillingPage() {
               </div>
             </div>
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Motivo da Contestação *
@@ -963,22 +964,20 @@ export function BillingPage() {
         {selectedBill && (
           <div className="space-y-6">
             {/* Status Banner */}
-            <div className={`p-4 rounded-lg border ${
-              selectedBill.status === "paid" 
-                ? "bg-green-50 border-green-200" 
-                : selectedBill.status === "overdue"
+            <div className={`p-4 rounded-lg border ${selectedBill.status === "paid"
+              ? "bg-green-50 border-green-200"
+              : selectedBill.status === "overdue"
                 ? "bg-red-50 border-red-200"
                 : "bg-amber-50 border-amber-200"
-            }`}>
+              }`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className={`w-3 h-3 rounded-full ${
-                    selectedBill.status === "paid" 
-                      ? "bg-green-500" 
-                      : selectedBill.status === "overdue"
+                  <div className={`w-3 h-3 rounded-full ${selectedBill.status === "paid"
+                    ? "bg-green-500"
+                    : selectedBill.status === "overdue"
                       ? "bg-red-500"
                       : "bg-amber-500"
-                  }`} />
+                    }`} />
                   <span className="font-medium text-gray-900">
                     Status: {getStatusText(selectedBill.status)}
                   </span>
@@ -1110,8 +1109,8 @@ export function BillingPage() {
               <Button
                 variant="secondary"
                 onClick={() => {
-                  // Simular download do PDF
-                  alert(`Download da fatura #${selectedBill.id.slice(-8)} iniciado!`)
+                  // Gerar e baixar o PDF da fatura
+                  generateBillPDF(selectedBill)
                 }}
                 className="flex-1"
               >
@@ -1135,13 +1134,12 @@ export function BillingPage() {
         {selectedDispute && (
           <div className="space-y-6">
             {/* Status */}
-            <div className={`p-4 rounded-lg border ${
-              selectedDispute.status === "approved" 
-                ? "bg-green-50 border-green-200" 
-                : selectedDispute.status === "rejected"
+            <div className={`p-4 rounded-lg border ${selectedDispute.status === "approved"
+              ? "bg-green-50 border-green-200"
+              : selectedDispute.status === "rejected"
                 ? "bg-red-50 border-red-200"
                 : "bg-amber-50 border-amber-200"
-            }`}>
+              }`}>
               <div className="flex items-center justify-between">
                 <span className="font-medium text-gray-900">
                   Status da Contestação
@@ -1209,13 +1207,12 @@ export function BillingPage() {
         {selectedNegotiation && (
           <div className="space-y-6">
             {/* Status */}
-            <div className={`p-4 rounded-lg border ${
-              selectedNegotiation.status === "completed" 
-                ? "bg-green-50 border-green-200" 
-                : selectedNegotiation.status === "active"
+            <div className={`p-4 rounded-lg border ${selectedNegotiation.status === "completed"
+              ? "bg-green-50 border-green-200"
+              : selectedNegotiation.status === "active"
                 ? "bg-blue-50 border-blue-200"
                 : "bg-purple-50 border-purple-200"
-            }`}>
+              }`}>
               <div className="flex items-center justify-between">
                 <span className="font-medium text-gray-900">
                   Status da Negociação
@@ -1289,7 +1286,7 @@ export function BillingPage() {
                 {Array.from({ length: selectedNegotiation.installments }, (_, index) => {
                   const dueDate = new Date()
                   dueDate.setMonth(dueDate.getMonth() + index + 1)
-                  
+
                   return (
                     <div key={index} className="flex justify-between items-center py-2 border-b border-gray-100">
                       <span className="text-gray-600">
@@ -1313,8 +1310,8 @@ export function BillingPage() {
             {/* Actions */}
             {selectedNegotiation.status === "proposed" && user?.role !== "citizen" && (
               <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <Button 
-                  variant="success" 
+                <Button
+                  variant="success"
                   className="flex-1"
                   onClick={() => {
                     resolveNegotiationMutation.mutate({
@@ -1326,8 +1323,8 @@ export function BillingPage() {
                 >
                   ✅ Aprovar Negociação
                 </Button>
-                <Button 
-                  variant="danger" 
+                <Button
+                  variant="danger"
                   className="flex-1"
                   onClick={() => {
                     resolveNegotiationMutation.mutate({
@@ -1346,8 +1343,8 @@ export function BillingPage() {
       </Modal>
 
       {/* Modal para Resolver Contestação */}
-      <Modal 
-        isOpen={showResolveDispute} 
+      <Modal
+        isOpen={showResolveDispute}
         onClose={() => {
           setShowResolveDispute(false)
           setResolutionText("")
@@ -1372,7 +1369,7 @@ export function BillingPage() {
                 </p>
               )}
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 {resolutionType === "approve" ? "Motivo da Aprovação" : "Motivo da Rejeição"}
@@ -1386,10 +1383,10 @@ export function BillingPage() {
                 required
               />
             </div>
-            
+
             <div className="flex gap-3 pt-4 border-t border-gray-200">
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="flex-1"
                 onClick={() => {
                   setShowResolveDispute(false)
@@ -1400,7 +1397,7 @@ export function BillingPage() {
               >
                 Cancelar
               </Button>
-              <Button 
+              <Button
                 variant={resolutionType === "approve" ? "success" : "danger"}
                 className="flex-1"
                 onClick={() => {
@@ -1423,8 +1420,8 @@ export function BillingPage() {
       </Modal>
 
       {/* Modal para Criar Nova Negociação */}
-      <Modal 
-        isOpen={showCreateNegotiation} 
+      <Modal
+        isOpen={showCreateNegotiation}
         onClose={() => {
           setShowCreateNegotiation(false)
           setNewNegotiation({
@@ -1451,7 +1448,7 @@ export function BillingPage() {
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Valor Total da Dívida (R$)
@@ -1465,7 +1462,7 @@ export function BillingPage() {
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Número de Parcelas
@@ -1479,7 +1476,7 @@ export function BillingPage() {
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Desconto (%)
@@ -1494,7 +1491,7 @@ export function BillingPage() {
                 placeholder="0,00"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Taxa de Juros (% ao mês)
@@ -1509,7 +1506,7 @@ export function BillingPage() {
               />
             </div>
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Observações (Opcional)
@@ -1522,7 +1519,7 @@ export function BillingPage() {
               rows={3}
             />
           </div>
-          
+
           <div className="bg-blue-50 p-4 rounded-lg">
             <h4 className="font-medium text-blue-900 mb-2">Resumo da Negociação</h4>
             <div className="text-sm text-blue-800 space-y-1">
@@ -1533,10 +1530,10 @@ export function BillingPage() {
               <p><span className="font-medium">Valor por Parcela:</span> R$ {newNegotiation.installments ? ((parseFloat(newNegotiation.totalDebt || "0") * (1 - parseFloat(newNegotiation.discountPercentage || "0") / 100)) / parseInt(newNegotiation.installments)).toFixed(2) : "0,00"}</p>
             </div>
           </div>
-          
+
           <div className="flex gap-3 pt-4 border-t border-gray-200">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               className="flex-1"
               onClick={() => {
                 setShowCreateNegotiation(false)
@@ -1552,7 +1549,7 @@ export function BillingPage() {
             >
               Cancelar
             </Button>
-            <Button 
+            <Button
               className="flex-1 bg-blue-600 hover:bg-blue-700"
               onClick={() => {
                 if (newNegotiation.customerId && newNegotiation.totalDebt && newNegotiation.installments) {

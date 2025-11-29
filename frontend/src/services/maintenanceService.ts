@@ -97,6 +97,10 @@ export const maintenanceService = {
     return api.put(`/maintenance/teams/${id}`, data)
   },
 
+  deleteTeam(id: number): Promise<AxiosResponse<void>> {
+    return api.delete(`/maintenance/teams/${id}`)
+  },
+
   getTeamMembers(teamId: number): Promise<AxiosResponse<TeamMember[]>> {
     return api.get(`/maintenance/teams/${teamId}/members`)
   },
@@ -239,6 +243,10 @@ export const maintenanceDev = {
 
   updateTeam(id: number, data: any): Promise<AxiosResponse<{ data: Team }>> {
     return maintenanceDirect.put(`/maintenance/teams/${id}`, data)
+  },
+
+  deleteTeam(id: number): Promise<AxiosResponse<void>> {
+    return maintenanceDirect.delete(`/maintenance/teams/${id}`)
   },
 
   getTeamMembers(teamId: number): Promise<AxiosResponse<{ data: TeamMember[] }>> {

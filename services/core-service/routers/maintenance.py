@@ -138,13 +138,13 @@ async def create_service_order(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Create service order (maintenance manager only)"""
+    """Create service order (maintenance manager and operator)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas gerentes de manutenção podem criar ordens de serviço"
+            detail="Apenas gerentes de manutenção e operadores podem criar ordens de serviço"
         )
     
     protocol_number = generate_protocol_number()
@@ -517,13 +517,18 @@ async def create_team(
     """Create maintenance team"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Check if team name already exists
     existing = db.query(Team).filter(Team.name == team_data.name).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome da equipe já existe")
+    
+    # Serialize lists to JSON strings for database storage
+    import json
+    work_areas_json = json.dumps(team_data.work_areas) if team_data.work_areas else json.dumps([])
+    equipment_json = json.dumps(team_data.equipment) if team_data.equipment else json.dumps([])
     
     team = Team(
         name=team_data.name,
@@ -533,15 +538,36 @@ async def create_team(
         max_concurrent_orders=team_data.max_concurrent_orders,
         supervisor_name=team_data.supervisor_name,
         supervisor_contact=team_data.supervisor_contact,
-        work_areas=team_data.work_areas,
-        equipment=team_data.equipment
+        work_areas=work_areas_json,
+        equipment=equipment_json
     )
     
     db.add(team)
     db.commit()
     db.refresh(team)
     
-    return team
+    # Deserialize for response
+    team_dict = {
+        "id": team.id,
+        "name": team.name,
+        "description": team.description,
+        "specialization": team.specialization,
+        "members_count": team.members_count,
+        "max_concurrent_orders": team.max_concurrent_orders,
+        "supervisor_name": team.supervisor_name,
+        "supervisor_contact": team.supervisor_contact,
+        "is_active": team.is_active,
+        "current_workload": team.current_workload,
+        "work_areas": json.loads(team.work_areas) if team.work_areas else [],
+        "equipment": json.loads(team.equipment) if team.equipment else [],
+        "performance_rating": team.performance_rating,
+        "completed_orders": team.completed_orders,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+        "members": None
+    }
+    
+    return team_dict
 
 @router.put("/teams/{team_id}", response_model=TeamResponse)
 async def update_team(
@@ -552,19 +578,86 @@ async def update_team(
 ):
     """Update maintenance team"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipe não encontrada")
     
-    for field, value in team_update.dict(exclude_unset=True).items():
+    import json
+    update_data = team_update.dict(exclude_unset=True)
+    
+    # Serialize lists to JSON strings
+    if "work_areas" in update_data and update_data["work_areas"] is not None:
+        update_data["work_areas"] = json.dumps(update_data["work_areas"])
+    if "equipment" in update_data and update_data["equipment"] is not None:
+        update_data["equipment"] = json.dumps(update_data["equipment"])
+    
+    for field, value in update_data.items():
         setattr(team, field, value)
     team.updated_at = datetime.now()
     db.commit()
     db.refresh(team)
-    return team
+    
+    # Deserialize for response
+    team_dict = {
+        "id": team.id,
+        "name": team.name,
+        "description": team.description,
+        "specialization": team.specialization,
+        "members_count": team.members_count,
+        "max_concurrent_orders": team.max_concurrent_orders,
+        "supervisor_name": team.supervisor_name,
+        "supervisor_contact": team.supervisor_contact,
+        "is_active": team.is_active,
+        "current_workload": team.current_workload,
+        "work_areas": json.loads(team.work_areas) if team.work_areas else [],
+        "equipment": json.loads(team.equipment) if team.equipment else [],
+        "performance_rating": team.performance_rating,
+        "completed_orders": team.completed_orders,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+        "members": None
+    }
+    
+    return team_dict
+
+@router.delete("/teams/{team_id}")
+async def delete_team(
+    team_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Delete a maintenance team if it has no active work orders"""
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipe não encontrada")
+    
+    # Check if team has active work orders
+    active_orders = db.query(ServiceOrder).filter(
+        ServiceOrder.assigned_team == team.name,
+        ServiceOrder.status.in_([ServiceOrderStatus.ASSIGNED, ServiceOrderStatus.IN_PROGRESS])
+    ).count()
+    
+    if active_orders > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"Não é possível apagar equipe com {active_orders} ordens de serviço ativas"
+        )
+    
+    # Delete all team members first
+    db.query(TeamMember).filter(TeamMember.team_id == team_id).delete()
+    
+    # Delete team
+    db.delete(team)
+    db.commit()
+    
+    return {"success": True, "message": f"Equipe {team.name} foi apagada com sucesso"}
 
 @router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
 async def list_team_members(
@@ -586,7 +679,7 @@ async def add_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
@@ -613,7 +706,7 @@ async def update_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     member = db.query(TeamMember).filter(TeamMember.id == member_id, TeamMember.team_id == team_id).first()
     if not member:
@@ -632,7 +725,7 @@ async def delete_team_member(
     db: Session = Depends(get_db)
 ):
     user = await verify_user_token(f"Bearer {credentials.credentials}")
-    if not has_role(user, "MAINTENANCE_MANAGER"):
+    if not has_any_role(user, ["MAINTENANCE_MANAGER", "OPERATOR"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     member = db.query(TeamMember).filter(TeamMember.id == member_id, TeamMember.team_id == team_id).first()
     if not member:
@@ -673,13 +766,22 @@ async def get_teams(
                 "available" if team.is_active and current_workload < (team.max_concurrent_orders or 0) else "busy"
             )
             
-            # Fix work_areas and equipment if they are PostgreSQL array strings
+            # Fix work_areas and equipment if they are JSON strings
+            import json
             if isinstance(team.work_areas, str):
-                # Convert PostgreSQL array string like '{string}' to Python list
-                team.work_areas = team.work_areas.strip('{}').split(',') if team.work_areas and team.work_areas != '{}' else []
+                try:
+                    parsed = json.loads(team.work_areas) if team.work_areas else []
+                    # Ensure it's a list, not a dict
+                    team.work_areas = parsed if isinstance(parsed, list) else []
+                except:
+                    team.work_areas = []
             if isinstance(team.equipment, str):
-                # Convert PostgreSQL array string like '{teste}' to Python list
-                team.equipment = team.equipment.strip('{}').split(',') if team.equipment and team.equipment != '{}' else []
+                try:
+                    parsed = json.loads(team.equipment) if team.equipment else []
+                    # Ensure it's a list, not a dict
+                    team.equipment = parsed if isinstance(parsed, list) else []
+                except:
+                    team.equipment = []
             
             members = db.query(TeamMember).filter(TeamMember.team_id == team.id, TeamMember.is_active == True).all()
             # Attach simple members list for response
