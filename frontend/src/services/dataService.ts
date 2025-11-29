@@ -100,7 +100,16 @@ class DataService {
   async payBill(billId: string): Promise<any> {
     if (appConfig.useRealData) {
       try {
-        const response = await api.post(`/billing/bills/${billId}/pay`)
+        // Backend espera ID numérico; quando recebemos no frontend ele vem como "bill-XXX-2024"
+        // Tentamos extrair o número central; se não der, usamos como veio (para compatibilidade)
+        let idForApi: string | number = billId
+        const parts = billId.split('-')
+        if (parts.length >= 3) {
+          const maybeNum = parseInt(parts[1], 10)
+          if (!Number.isNaN(maybeNum)) idForApi = maybeNum
+        }
+
+        const response = await api.post(`/billing/bills/${idForApi}/pay`)
         return response.data
       } catch (error) {
         console.error('Failed to pay bill via API:', error)

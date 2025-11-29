@@ -18,6 +18,8 @@ import { formatCurrency, formatDate, getStatusColor, getStatusText } from "../ut
 import { BillListSkeleton, StatCardSkeleton } from "../components/billing/BillingSkeleton"
 import dataService, { type Bill, type BillDispute, type DebtNegotiation } from "../services/dataService"
 import { generateBillPDF } from "../utils/pdfGenerator"
+import appConfig from "../config/app.config"
+import { buildInfinitePayCheckoutUrl } from "../utils/infinitepay"
 
 export function BillingPage() {
   const { user } = useAuth()
@@ -191,6 +193,39 @@ export function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ["bills"] })
     },
   })
+
+  const handlePayBill = (bill: Bill) => {
+    try {
+      console.log('🔵 handlePayBill called with bill:', bill)
+      
+      const handle = appConfig.payments.infinitePayHandle
+      console.log('🔵 InfinitePay handle:', handle)
+      
+      if (!handle) {
+        alert("Configure o handle da InfinitePay em app.config.ts (payments.infinitePayHandle)")
+        return
+      }
+
+      const order_nsu = bill.id
+      const redirect_url = `${window.location.origin}${appConfig.payments.successRedirectPath}`
+  // Exibir apenas "Fatura" no checkout (ID já está em order_nsu para rastreio interno)
+  const items = [{ name: "Fatura", price: Math.round(bill.amount * 100), quantity: 1 }]
+      const customer = { customer_name: user?.full_name || "", customer_email: user?.email || "" }
+      
+      console.log('🔵 Building URL with params:', { handle, items, order_nsu, redirect_url, customer })
+      
+      const url = buildInfinitePayCheckoutUrl({ handle, items, order_nsu, redirect_url, customer })
+      console.log('🟢 Generated checkout URL:', url)
+      
+      const newWindow = window.open(url, "_blank")
+      if (!newWindow) {
+        alert("Pop-up bloqueado! Permita pop-ups para este site e tente novamente.")
+      }
+    } catch (error) {
+      console.error('❌ Error in handlePayBill:', error)
+      alert(`Erro ao gerar link de pagamento: ${error instanceof Error ? error.message : 'Erro desconhecido'}`)
+    }
+  }
 
   // Resolve dispute mutation (approve/reject)
   const resolveDisputeMutation = useMutation({
@@ -657,7 +692,7 @@ export function BillingPage() {
                         {user?.role === "citizen" && bill.status === "pending" && (
                           <>
                             <Button
-                              onClick={() => processPaymentMutation.mutate(bill.id)}
+                              onClick={() => handlePayBill(bill)}
                               variant="success"
                               size="sm"
                               isLoading={processPaymentMutation.isPending}
@@ -1085,7 +1120,7 @@ export function BillingPage() {
                 <>
                   <Button
                     onClick={() => {
-                      processPaymentMutation.mutate(selectedBill.id)
+                      handlePayBill(selectedBill)
                       setShowBillDetails(false)
                     }}
                     variant="success"

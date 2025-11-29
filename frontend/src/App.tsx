@@ -18,6 +18,7 @@ import { SupportPage } from "./pages/SupportPage"
 import { ChatPage } from "./pages/ChatPage"
 import { ProfilePage } from "./pages/ProfilePage"
 import { ReportsPage } from "./pages/ReportsPage"
+import PaymentSuccessPage from "./pages/PaymentSuccess"
 
 import "./index.css"
 
@@ -43,6 +44,7 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/forgot-password" element={<ResetPasswordPage />} />
                 <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+                <Route path="/payment/success" element={<PaymentSuccessPage />} />
 
                 {/* Protected routes */}
                 <Route
