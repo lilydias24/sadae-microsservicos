@@ -5,7 +5,7 @@ import { maintenanceDev } from "../services/maintenanceService"
 import { useAuth } from "../contexts/AuthContext"
 import { ServiceOrderKanban } from "../components/ServiceOrderKanban"
 import { ServiceOrderDetailModal } from "../components/ServiceOrderDetailModal"
-import { LayoutGrid, List } from "lucide-react"
+import { LayoutGrid, List, MapPin, Calendar } from "lucide-react"
 
 interface WorkOrder {
   id: string
@@ -53,8 +53,9 @@ export function MaintenancePage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints" | "chat">("orders")
+  const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints" | "chat" | "team-panel">("orders")
   const [viewMode, setViewMode] = useState<"list" | "kanban">("kanban")
+  const [selectedTeamForPanel, setSelectedTeamForPanel] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null)
   const [showCreateOrder, setShowCreateOrder] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -525,6 +526,7 @@ export function MaintenancePage() {
             { id: "orders", name: "Ordens de Serviço", icon: "" },
             { id: "teams", name: "Equipes", icon: "" },
             { id: "complaints", name: "Reclamações", icon: "" },
+            { id: "team-panel", name: "Painel da Equipe", icon: "👥" },
             { id: "chat", name: "Chat", icon: "🛠️" },
           ].map((tab) => (
             <button
@@ -1576,6 +1578,354 @@ export function MaintenancePage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Team Panel Tab */}
+      {activeTab === "team-panel" && (
+        <div className="space-y-6">
+          {/* Team Selection */}
+          {!selectedTeamForPanel ? (
+            <div className="bg-white rounded-lg shadow p-8">
+              <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
+                👥 Selecione sua Equipe
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {teams
+                  .filter(team => team.is_active)
+                  .map(team => (
+                    <button
+                      key={team.id}
+                      onClick={() => setSelectedTeamForPanel(team.name)}
+                      className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-lg transition text-left group"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <h4 className="font-semibold text-gray-900 text-lg group-hover:text-blue-600">
+                          {team.name}
+                        </h4>
+                        <span className="text-2xl">{team.specialization?.includes("Hidráulica") ? "🚰" : team.specialization?.includes("Civil") ? "🏗️" : "🔧"}</span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">{team.specialization || "Manutenção Geral"}</p>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">
+                          Carga: {team.current_workload}/{team.max_concurrent_orders}
+                        </span>
+                        <span className={`px-2 py-1 rounded-full ${
+                          (team.current_workload || 0) >= (team.max_concurrent_orders || 5)
+                            ? "bg-red-100 text-red-700"
+                            : (team.current_workload || 0) > (team.max_concurrent_orders || 5) * 0.7
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-green-100 text-green-700"
+                        }`}>
+                          {(team.current_workload || 0) >= (team.max_concurrent_orders || 5)
+                            ? "Lotada"
+                            : (team.current_workload || 0) > (team.max_concurrent_orders || 5) * 0.7
+                            ? "Ocupada"
+                            : "Disponível"}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Team Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg shadow-lg p-6 text-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold mb-2">👥 {selectedTeamForPanel}</h3>
+                    <p className="text-blue-100">
+                      {teams.find(t => t.name === selectedTeamForPanel)?.specialization || "Equipe de Manutenção"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedTeamForPanel(null)}
+                    className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition"
+                  >
+                    Trocar Equipe
+                  </button>
+                </div>
+              </div>
+
+              {/* Team Metrics */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Serviços Concluídos */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h5 className="text-sm font-medium text-gray-600">Concluídos</h5>
+                    <span className="text-2xl">✅</span>
+                  </div>
+                  <p className="text-3xl font-bold text-green-600">
+                    {workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status === "completed").length}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Serviços finalizados</p>
+                </div>
+
+                {/* Serviços Restantes */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h5 className="text-sm font-medium text-gray-600">Pendentes</h5>
+                    <span className="text-2xl">📋</span>
+                  </div>
+                  <p className="text-3xl font-bold text-orange-600">
+                    {workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status !== "completed").length}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Aguardando conclusão</p>
+                </div>
+
+                {/* Em Progresso */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h5 className="text-sm font-medium text-gray-600">Em Andamento</h5>
+                    <span className="text-2xl">⚙️</span>
+                  </div>
+                  <p className="text-3xl font-bold text-purple-600">
+                    {workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status === "in_progress").length}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Trabalhando agora</p>
+                </div>
+
+                {/* Taxa de Conclusão */}
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h5 className="text-sm font-medium text-gray-600">Taxa Conclusão</h5>
+                    <span className="text-2xl">📊</span>
+                  </div>
+                  <p className="text-3xl font-bold text-blue-600">
+                    {(() => {
+                      const total = workOrders.filter(order => order.assigned_team === selectedTeamForPanel).length
+                      const completed = workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status === "completed").length
+                      return total > 0 ? Math.round((completed / total) * 100) : 0
+                    })()}%
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Eficiência geral</p>
+                </div>
+              </div>
+
+              {/* Tipos de Atendimento Mais Realizados */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  📈 Tipos de Atendimento Mais Realizados
+                </h4>
+                <div className="space-y-3">
+                  {(() => {
+                    const completedOrders = workOrders.filter(order => 
+                      order.assigned_team === selectedTeamForPanel && order.status === "completed"
+                    )
+                    
+                    // Conta ocorrências por prioridade
+                    const priorityCounts = completedOrders.reduce((acc, order) => {
+                      acc[order.priority] = (acc[order.priority] || 0) + 1
+                      return acc
+                    }, {} as Record<string, number>)
+
+                    // Converte para array e ordena
+                    const sortedPriorities = (Object.entries(priorityCounts) as [string, number][])
+                      .sort((a, b) => b[1] - a[1])
+                      .slice(0, 4)
+
+                    if (sortedPriorities.length === 0) {
+                      return (
+                        <p className="text-gray-500 text-sm text-center py-4">
+                          Nenhum serviço concluído ainda
+                        </p>
+                      )
+                    }
+
+                    const priorityLabels: Record<string, string> = {
+                      critical: "Crítica",
+                      high: "Alta",
+                      medium: "Média",
+                      low: "Baixa"
+                    }
+
+                    const priorityColors: Record<string, string> = {
+                      critical: "bg-red-500",
+                      high: "bg-orange-500",
+                      medium: "bg-yellow-500",
+                      low: "bg-green-500"
+                    }
+
+                    const maxCount = sortedPriorities[0][1]
+
+                    return sortedPriorities.map(([priority, count]) => (
+                      <div key={priority} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium text-gray-700">
+                            {priorityLabels[priority] || priority}
+                          </span>
+                          <span className="text-gray-600">
+                            {count} {count === 1 ? 'serviço' : 'serviços'}
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                          <div
+                            className={`${priorityColors[priority] || 'bg-gray-500'} h-2.5 rounded-full transition-all`}
+                            style={{ width: `${(count / maxCount) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              </div>
+
+              {/* Team Orders */}
+              <div className="bg-white rounded-lg shadow">
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900">Ordens de Serviço Atribuídas</h4>
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {workOrders
+                    .filter(order => order.assigned_team === selectedTeamForPanel && order.status !== "completed")
+                    .map(order => (
+                      <div key={order.id} className="p-6 hover:bg-gray-50">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h5 className="font-semibold text-gray-900">{order.title}</h5>
+                              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                order.priority === "critical" ? "bg-red-100 text-red-700" :
+                                order.priority === "high" ? "bg-orange-100 text-orange-700" :
+                                order.priority === "medium" ? "bg-yellow-100 text-yellow-700" :
+                                "bg-green-100 text-green-700"
+                              }`}>
+                                {order.priority === "critical" ? "Crítica" :
+                                 order.priority === "high" ? "Alta" :
+                                 order.priority === "medium" ? "Média" : "Baixa"}
+                              </span>
+                              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                order.status === "assigned" ? "bg-blue-100 text-blue-700" :
+                                order.status === "in_progress" ? "bg-purple-100 text-purple-700" :
+                                "bg-gray-100 text-gray-700"
+                              }`}>
+                                {order.status === "assigned" ? "Atribuída" :
+                                 order.status === "in_progress" ? "Em Progresso" : order.status}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-2">{order.description}</p>
+                            <div className="flex items-center gap-4 text-xs text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                {order.location}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                {new Date(order.created_at).toLocaleDateString("pt-BR")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-2">
+                          {order.status === "assigned" && (
+                            <button
+                              onClick={() => {
+                                maintenanceDev.updateWorkOrder(parseInt(order.id), { status: "in_progress" })
+                                  .then(() => {
+                                    queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+                                    alert("✅ Ordem marcada como 'Em Progresso'")
+                                  })
+                                  .catch(() => alert("❌ Erro ao atualizar status"))
+                              }}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
+                            >
+                              ▶️ Iniciar Trabalho
+                            </button>
+                          )}
+                          
+                          {order.status === "in_progress" && (
+                            <button
+                              onClick={() => {
+                                // eslint-disable-next-line no-restricted-globals
+                                if (confirm("Deseja marcar esta ordem como concluída?")) {
+                                  maintenanceDev.updateWorkOrder(parseInt(order.id), { status: "completed" })
+                                    .then(() => {
+                                      queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+                                      queryClient.invalidateQueries({ queryKey: ['teams'] })
+                                      alert("✅ Ordem concluída com sucesso!")
+                                    })
+                                    .catch(() => alert("❌ Erro ao concluir ordem"))
+                                }
+                              }}
+                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
+                            >
+                              ✓ Concluir Serviço
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => {
+                              const newTeam = prompt(`Transferir ordem para qual equipe?\n\nEquipes disponíveis:\n${teams.filter(t => t.is_active && t.name !== selectedTeamForPanel).map(t => `- ${t.name} (${t.current_workload}/${t.max_concurrent_orders})`).join('\n')}\n\nDigite o nome exato:`)
+                              if (newTeam && teams.some(t => t.name === newTeam)) {
+                                maintenanceDev.assignWorkOrder(parseInt(order.id), newTeam)
+                                  .then(() => {
+                                    queryClient.invalidateQueries({ queryKey: ['workOrders'] })
+                                    queryClient.invalidateQueries({ queryKey: ['teams'] })
+                                    alert(`✅ Ordem transferida para ${newTeam}`)
+                                  })
+                                  .catch(() => alert("❌ Erro ao transferir ordem"))
+                              } else if (newTeam) {
+                                alert("❌ Equipe não encontrada")
+                              }
+                            }}
+                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm font-medium"
+                          >
+                            🔄 Transferir
+                          </button>
+
+                          <button
+                            onClick={() => setSelectedOrderForDetail(order)}
+                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition text-sm font-medium"
+                          >
+                            👁️ Detalhes
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  
+                  {workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status !== "completed").length === 0 && (
+                    <div className="p-12 text-center text-gray-500">
+                      <div className="text-6xl mb-4">🎉</div>
+                      <p className="text-lg font-medium">Nenhuma ordem pendente!</p>
+                      <p className="text-sm">Sua equipe está sem serviços atribuídos no momento.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Completed Orders */}
+              {workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status === "completed").length > 0 && (
+                <div className="bg-white rounded-lg shadow">
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                      ✅ Serviços Concluídos ({workOrders.filter(order => order.assigned_team === selectedTeamForPanel && order.status === "completed").length})
+                    </h4>
+                  </div>
+                  <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
+                    {workOrders
+                      .filter(order => order.assigned_team === selectedTeamForPanel && order.status === "completed")
+                      .slice(0, 10)
+                      .map(order => (
+                        <div key={order.id} className="p-4 hover:bg-gray-50">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <h5 className="font-medium text-gray-900 text-sm">{order.title}</h5>
+                              <p className="text-xs text-gray-500 mt-1">{order.location}</p>
+                            </div>
+                            <span className="text-xs text-gray-400">
+                              {new Date(order.updated_at).toLocaleDateString("pt-BR")}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
