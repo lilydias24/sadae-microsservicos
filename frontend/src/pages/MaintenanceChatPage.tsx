@@ -141,13 +141,59 @@ export function MaintenanceChatPage() {
     }
   }
 
+  const translateStatus = (status: string): string => {
+    const statusMap: Record<string, string> = {
+      'open': 'Aberto',
+      'in_progress': 'Em Andamento',
+      'waiting_client': 'Aguardando Cliente',
+      'resolved': 'Resolvido',
+      'closed': 'Fechado'
+    }
+    return statusMap[status.toLowerCase()] || status
+  }
+
+  const translateCategory = (category: string): string => {
+    const categoryMap: Record<string, string> = {
+      'billing': 'Faturamento',
+      'technical': 'Técnico',
+      'complaint': 'Reclamação',
+      'request': 'Solicitação',
+      'information': 'Informação',
+      'emergency': 'Emergência'
+    }
+    return categoryMap[category.toLowerCase()] || category
+  }
+
+  const translatePriority = (priority: string): string => {
+    const priorityMap: Record<string, string> = {
+      'low': 'Baixa',
+      'medium': 'Média',
+      'high': 'Alta',
+      'urgent': 'Urgente'
+    }
+    return priorityMap[priority.toLowerCase()] || priority
+  }
+
   const createTicketContextSummary = (ticket: any): ChatMessage => {
-    const statusText = ticket.status?.value || ticket.status || 'Aberto'
-    const categoryText = ticket.category?.value || ticket.category || 'Não especificada'
-    const priorityText = ticket.priority?.value || ticket.priority || 'Média'
-    const createdAt = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('pt-BR') : 'Data não disponível'
+    const statusRaw = ticket.status?.value || ticket.status || 'open'
+    const categoryRaw = ticket.category?.value || ticket.category || ''
+    const priorityRaw = ticket.priority?.value || ticket.priority || 'medium'
     
-    const contextSummary = `📋 **Resumo do Ticket ${ticket.ticket_number}**\n\n` +
+    const statusText = translateStatus(statusRaw)
+    const categoryText = categoryRaw ? translateCategory(categoryRaw) : 'Não especificada'
+    const priorityText = translatePriority(priorityRaw)
+    const createdAt = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) : 'Data não disponível'
+    
+    // Usar o ID do ticket ao invés do ticket_number
+    const ticketId = ticket.id || ticket.ticket_id
+    
+    const contextSummary = `📋 **Resumo do Ticket #${ticketId}**\n\n` +
       `**Título:** ${ticket.title || 'Sem título'}\n` +
       `**Descrição:** ${ticket.description ? (ticket.description.length > 200 ? ticket.description.substring(0, 200) + '...' : ticket.description) : 'Sem descrição'}\n` +
       `**Status:** ${statusText}\n` +

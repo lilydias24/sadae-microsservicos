@@ -16,7 +16,7 @@ interface ChatMessage {
   author_name?: string
 }
 
-// Função para traduzir status para português
+// Funções para traduzir informações para português
 const translateStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
     'open': 'Aberto',
@@ -25,7 +25,29 @@ const translateStatus = (status: string): string => {
     'resolved': 'Resolvido',
     'closed': 'Fechado'
   }
-  return statusMap[status] || status
+  return statusMap[status.toLowerCase()] || status
+}
+
+const translateCategory = (category: string): string => {
+  const categoryMap: Record<string, string> = {
+    'billing': 'Faturamento',
+    'technical': 'Técnico',
+    'complaint': 'Reclamação',
+    'request': 'Solicitação',
+    'information': 'Informação',
+    'emergency': 'Emergência'
+  }
+  return categoryMap[category.toLowerCase()] || category
+}
+
+const translatePriority = (priority: string): string => {
+  const priorityMap: Record<string, string> = {
+    'low': 'Baixa',
+    'medium': 'Média',
+    'high': 'Alta',
+    'urgent': 'Urgente'
+  }
+  return priorityMap[priority.toLowerCase()] || priority
 }
 
 export function ChatPage() {
@@ -104,7 +126,7 @@ export function ChatPage() {
         title: ticket.title || 'Ticket',
         description: ticket.description || '',
         status: ticket.status?.value || ticket.status || 'open',
-        ticket_number: ticket.ticket_number || `#${ticketId}`
+        ticket_number: `#${ticketId}` // Usar o ID do ticket
       })
       // Set current ticket ID
       setCurrentTicketId(ticketId)
@@ -125,7 +147,7 @@ export function ChatPage() {
         // No messages yet, show context message
         const contextMessage: ChatMessage = {
           id: `context-${Date.now()}`,
-          content: `📋 **Contexto do Ticket ${ticket.ticket_number}**\n\n**Título:** ${ticket.title}\n**Descrição:** ${ticket.description}\n**Status:** ${ticket.status?.value || ticket.status || 'Aberto'}\n\nComo posso ajudá-lo com este ticket?`,
+          content: `📋 **Contexto do Ticket #${ticket.id || ticketId}**\n\n**Título:** ${ticket.title}\n**Descrição:** ${ticket.description}\n**Status:** ${translateStatus(ticket.status?.value || ticket.status || 'open')}\n\nComo posso ajudá-lo com este ticket?`,
           sender: 'bot',
           timestamp: new Date(),
           ticket_id: ticketId,
@@ -617,13 +639,26 @@ Quer simular o valor da sua próxima fatura?`
   }
 
   const createTicketContextSummary = (ticket: any): ChatMessage => {
-    const statusText = ticket.status?.value || ticket.status || 'Aberto'
-    const categoryText = ticket.category?.value || ticket.category || 'Não especificada'
-    const priorityText = ticket.priority?.value || ticket.priority || 'Média'
-    const createdAt = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('pt-BR') : 'Data não disponível'
+    const statusRaw = ticket.status?.value || ticket.status || 'open'
+    const categoryRaw = ticket.category?.value || ticket.category || ''
+    const priorityRaw = ticket.priority?.value || ticket.priority || 'medium'
+    
+    const statusText = translateStatus(statusRaw)
+    const categoryText = categoryRaw ? translateCategory(categoryRaw) : 'Não especificada'
+    const priorityText = translatePriority(priorityRaw)
+    const createdAt = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) : 'Data não disponível'
+    
+    // Usar o ID do ticket ao invés do ticket_number
+    const ticketId = ticket.id || ticket.ticket_id
     
     // Criar resumo do contexto
-    const contextSummary = `📋 **Resumo do Ticket ${ticket.ticket_number}**\n\n` +
+    const contextSummary = `📋 **Resumo do Ticket #${ticketId}**\n\n` +
       `**Título:** ${ticket.title || 'Sem título'}\n` +
       `**Descrição:** ${ticket.description ? (ticket.description.length > 200 ? ticket.description.substring(0, 200) + '...' : ticket.description) : 'Sem descrição'}\n` +
       `**Status:** ${statusText}\n` +
@@ -653,7 +688,7 @@ Quer simular o valor da sua próxima fatura?`
         title: ticket.title || 'Ticket',
         description: ticket.description || '',
         status: ticket.status?.value || ticket.status || 'open',
-        ticket_number: ticket.ticket_number || `#${ticketId}`
+        ticket_number: `#${ticketId}` // Usar o ID do ticket
       })
       setCurrentTicketId(ticketId)
       
