@@ -160,21 +160,38 @@ export function SupportPage() {
     open_tickets: number
     in_progress_tickets: number
     resolved_tickets: number
+    closed_tickets: number
+    average_response_time: number
     average_resolution_time: number
     satisfaction_average: number
     tickets_by_category: Array<{ category: string; count: number }>
-    tickets_by_priority: Array<any>
+    tickets_by_priority: Array<{ priority: string; count: number }>
+    tickets_by_agent: Array<{
+      agent_id: number
+      agent_name: string
+      total_tickets: number
+      open_tickets: number
+      in_progress_tickets: number
+      resolved_tickets: number
+      closed_tickets: number
+      average_resolution_time: number
+    }>
     recent_tickets: Array<any>
+    top_agents: Array<any>
   }>({
     total_tickets: 0,
     open_tickets: 0,
     in_progress_tickets: 0,
     resolved_tickets: 0,
+    closed_tickets: 0,
+    average_response_time: 0,
     average_resolution_time: 0,
     satisfaction_average: 0,
     tickets_by_category: [],
     tickets_by_priority: [],
-    recent_tickets: []
+    tickets_by_agent: [],
+    recent_tickets: [],
+    top_agents: []
   })
 
   // Agent dashboard state
@@ -367,6 +384,7 @@ export function SupportPage() {
   const fetchDashboardStats = async () => {
     try {
       const { data } = await api.get('/support/dashboard')
+      console.log('📊 Dashboard data received:', data)
       // Mapear a resposta da API para o formato esperado pelo frontend
       const categoryMetrics = data.category_metrics || {}
       const ticketsByCategory = [
@@ -378,17 +396,33 @@ export function SupportPage() {
         { category: 'emergency', count: categoryMetrics.emergency || 0 }
       ].filter(item => item.count > 0) // Apenas categorias com tickets
       
-      setDashboardStats({
+      // Processar tickets por prioridade
+      const priorityMetrics = data.priority_metrics || {}
+      const ticketsByPriority = Object.entries(priorityMetrics).map(([priority, count]) => ({
+        priority,
+        count: count as number
+      })).filter(item => item.count > 0)
+      
+      // Processar tickets por atendente
+      const ticketsByAgent = Array.isArray(data.tickets_by_agent) ? data.tickets_by_agent : []
+      
+      const stats = {
         total_tickets: data.ticket_metrics?.total_tickets || 0,
         open_tickets: data.ticket_metrics?.open_tickets || 0,
         in_progress_tickets: data.ticket_metrics?.in_progress_tickets || 0,
         resolved_tickets: data.ticket_metrics?.resolved_tickets || 0,
+        closed_tickets: data.ticket_metrics?.closed_tickets || 0,
+        average_response_time: data.ticket_metrics?.average_response_time || 0,
         average_resolution_time: data.ticket_metrics?.average_resolution_time || 0,
         satisfaction_average: data.ticket_metrics?.satisfaction_average || 0,
         tickets_by_category: ticketsByCategory,
-        tickets_by_priority: [], // Não disponível na API atual
-        recent_tickets: Array.isArray(data.recent_tickets) ? data.recent_tickets : []
-      })
+        tickets_by_priority: ticketsByPriority,
+        tickets_by_agent: ticketsByAgent,
+        recent_tickets: Array.isArray(data.recent_tickets) ? data.recent_tickets : [],
+        top_agents: Array.isArray(data.top_agents) ? data.top_agents : []
+      }
+      console.log('📊 Dashboard stats processed:', stats)
+      setDashboardStats(stats)
     } catch (error) {
       console.error('Error fetching dashboard stats:', error)
       // Manter estado padrão em caso de erro
@@ -397,11 +431,15 @@ export function SupportPage() {
         open_tickets: 0,
         in_progress_tickets: 0,
         resolved_tickets: 0,
+        closed_tickets: 0,
+        average_response_time: 0,
         average_resolution_time: 0,
         satisfaction_average: 0,
         tickets_by_category: [],
         tickets_by_priority: [],
-        recent_tickets: []
+        tickets_by_agent: [],
+        recent_tickets: [],
+        top_agents: []
       })
     }
   }
@@ -1187,8 +1225,8 @@ export function SupportPage() {
                   </div>
                 )}
                 
-                {/* Evaluation Section for Resolved/Closed Tickets */}
-                {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
+                {/* Evaluation Section for Resolved/Closed Tickets - Only for Citizens */}
+                {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (user?.role === 'citizen') && (
                   <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
                     {selectedTicket.satisfaction_rating || selectedTicket.evaluation ? (
                       <div>
@@ -1777,17 +1815,37 @@ export function SupportPage() {
                     </div>
                   </div>
                 </div>
+
+                <div className="bg-white p-6 rounded-lg shadow border">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <CheckCircle className="h-8 w-8 text-gray-600" />
+                    </div>
+                    <div className="ml-5 w-0 flex-1">
+                      <dl>
+                        <dt className="text-sm font-medium text-gray-500 truncate">Fechados</dt>
+                        <dd className="text-lg font-medium text-gray-900">{dashboardStats.closed_tickets || 0}</dd>
+                      </dl>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Performance Metrics */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-lg shadow border">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Métricas de Performance</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Tempo Médio de Resposta</span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {(dashboardStats.average_response_time || 0).toFixed(1)}h
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Tempo Médio de Resolução</span>
                       <span className="text-sm font-medium text-gray-900">
-                        {(dashboardStats.average_resolution_time || 0).toFixed(1)} horas
+                        {(dashboardStats.average_resolution_time || 0).toFixed(1)}h
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -1826,7 +1884,76 @@ export function SupportPage() {
                     )}
                   </div>
                 </div>
+
+                <div className="bg-white p-6 rounded-lg shadow border">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Distribuição por Prioridade</h3>
+                  <div className="space-y-3">
+                    {Array.isArray(dashboardStats.tickets_by_priority) && dashboardStats.tickets_by_priority.length > 0 ? (
+                      dashboardStats.tickets_by_priority.map((item: any) => (
+                        <div key={item.priority} className="flex justify-between items-center">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[item.priority] || 'bg-gray-100 text-gray-800'}`}>
+                            {item.priority}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900">{item.count}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">Nenhum ticket por prioridade registrado</p>
+                    )}
+                  </div>
+                </div>
               </div>
+
+              {/* Tickets por Atendente */}
+              {Array.isArray(dashboardStats.tickets_by_agent) && dashboardStats.tickets_by_agent.length > 0 && (
+                <div className="bg-white rounded-lg shadow border">
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900">Tickets por Atendente</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Atendente</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Abertos</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Em Andamento</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resolvidos</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fechados</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tempo Médio Resolução</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {dashboardStats.tickets_by_agent.map((agent: any) => (
+                          <tr key={agent.agent_id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {agent.agent_name}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.total_tickets}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.open_tickets}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.in_progress_tickets}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.resolved_tickets}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.closed_tickets}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {agent.average_resolution_time.toFixed(1)}h
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Recent Tickets */}
               <div className="bg-white rounded-lg shadow border">

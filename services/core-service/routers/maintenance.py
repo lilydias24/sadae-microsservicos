@@ -897,9 +897,9 @@ async def generate_interventions_report(
     query = db.query(Maintenance).join(ServiceOrder, Maintenance.service_order_id == ServiceOrder.id)
     
     if filters.start_date:
-        query = query.filter(Maintenance.completed_at >= filters.start_date)
+        query = query.filter(Maintenance.completion_date >= filters.start_date)
     if filters.end_date:
-        query = query.filter(Maintenance.completed_at <= filters.end_date)
+        query = query.filter(Maintenance.completion_date <= filters.end_date)
     if filters.team_name:
         query = query.filter(ServiceOrder.assigned_team.ilike(f"%{filters.team_name}%"))
     if filters.location:
@@ -908,7 +908,7 @@ async def generate_interventions_report(
         # Assuming service_type maps to some field in ServiceOrder
         query = query.filter(ServiceOrder.description.ilike(f"%{filters.service_type}%"))
     
-    maintenances = query.order_by(desc(Maintenance.completed_at)).all()
+    maintenances = query.order_by(desc(Maintenance.completion_date)).all()
     
     # Calculate statistics
     total_interventions = len(maintenances)
@@ -918,8 +918,8 @@ async def generate_interventions_report(
     # Calculate average time (TMR - Time to Repair)
     total_duration_hours = 0
     for m in maintenances:
-        if m.service_order and m.completed_at and m.service_order.created_at:
-            duration = (m.completed_at - m.service_order.created_at).total_seconds() / 3600
+        if m.service_order and m.completion_date and m.service_order.created_at:
+            duration = (m.completion_date - m.service_order.created_at).total_seconds() / 3600
             total_duration_hours += duration
     avg_duration_hours = total_duration_hours / total_interventions if total_interventions > 0 else 0
     
@@ -936,8 +936,8 @@ async def generate_interventions_report(
                 }
             team_stats[team]["total_interventions"] += 1
             team_stats[team]["total_cost"] += float(m.cost or 0)
-            if m.service_order.created_at and m.completed_at:
-                duration = (m.completed_at - m.service_order.created_at).total_seconds() / 3600
+            if m.service_order.created_at and m.completion_date:
+                duration = (m.completion_date - m.service_order.created_at).total_seconds() / 3600
                 team_stats[team]["total_duration_hours"] += duration
     
     # Calculate averages for each team
@@ -976,7 +976,7 @@ async def generate_interventions_report(
                 "description": m.description,
                 "cost": float(m.cost or 0),
                 "duration_hours": m.duration_hours,
-                "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+                "completed_at": m.completion_date.isoformat() if m.completion_date else None,
                 "team_name": m.service_order.assigned_team if m.service_order else None
             }
             for m in maintenances

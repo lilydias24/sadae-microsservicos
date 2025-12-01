@@ -67,8 +67,23 @@ async def verify_user_token(authorization: str) -> dict:
         )
     
     token = authorization.split(" ")[1]
-    user = await verify_token(token)
-    return user
+    try:
+        # verify_token from shared.auth is synchronous, not async
+        payload = verify_token(token)
+        return {
+            "id": int(payload.get("sub", 1)),
+            "email": payload.get("email", ""),
+            "role": payload.get("role", "user"),
+            "name": payload.get("name", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Token verification error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
 
 # Simple connection manager for WebSocket
 class ConnectionManager:
@@ -177,7 +192,8 @@ async def create_anomaly(
     """Create anomaly alert (operator only)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user["role"] != UserRole.OPERATOR:
+    user_role = user.get("role", "")
+    if user_role != "operator":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     anomaly = Anomaly(
@@ -213,7 +229,8 @@ async def create_observation(
     """Create observation for sensor data (RF004)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user["role"] != UserRole.OPERATOR:
+    user_role = user.get("role", "")
+    if user_role != "operator":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Validate text length (10-500 characters as per business rule)
@@ -358,7 +375,9 @@ async def get_monitoring_dashboard(
     """Get monitoring dashboard metrics"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user["role"] not in [UserRole.OPERATOR, UserRole.MAINTENANCE_MANAGER]:
+    user_role = user.get("role", "")
+    allowed_roles = ["operator", "maintenance_manager"]
+    if user_role not in allowed_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Basic metrics
@@ -402,7 +421,10 @@ async def generate_sensor_report(
     """Generate sensor data report (RF002)"""
     user = await verify_user_token(f"Bearer {credentials.credentials}")
     
-    if user["role"] not in [UserRole.OPERATOR, UserRole.CRISIS_MANAGER]:
+    # Check permissions - operator and crisis_manager roles can generate reports
+    user_role = user.get("role", "")
+    allowed_roles = ["operator", "crisis_manager", "manager"]
+    if user_role not in allowed_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Validate period (max 90 days as per business rule)

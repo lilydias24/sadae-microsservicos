@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import and_, or_, desc, func
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import json
 
 # Add shared modules to path
@@ -20,7 +21,7 @@ sys.path.insert(0, '/app/shared')
 # Import shared modules with error handling
 try:
     from auth import verify_token
-    from utils import UserRole
+    from utils import UserRole, generate_protocol_number
 except ImportError as e:
     print(f"Warning: Could not import shared modules: {e}")
     # Create minimal fallbacks for development
@@ -30,10 +31,14 @@ except ImportError as e:
     class UserRole:
         CITIZEN = "citizen"
         OPERATOR = "operator"
+        MANAGER = "manager"
         MAINTENANCE_MANAGER = "maintenance_manager"
         FINANCIAL_MANAGER = "financial_manager"
         CRISIS_MANAGER = "crisis_manager"
         SUPPORT_AGENT = "support_agent"
+    
+    def generate_protocol_number():
+        return f"PROT-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
 from database import get_db
 from database_models import (
@@ -323,10 +328,16 @@ async def get_tickets(
     query = db.query(SupportTicket)
     
     # Apply filters based on user role
-    if user["role"] == UserRole.CITIZEN:
+    user_role = user.get("role", "")
+    if user_role == "citizen" or user_role == UserRole.CITIZEN:
         query = query.filter(SupportTicket.client_id == user["id"])
-    elif user["role"] in [UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
-        # These roles can see all tickets
+    elif user_role in ["operator", "support_agent"]:
+        # Operators and support agents should not see closed tickets in chat
+        # Filter out closed tickets unless explicitly requested via status filter
+        if status != TicketStatus.CLOSED:
+            query = query.filter(SupportTicket.status != TicketStatus.CLOSED)
+    elif user_role in ["manager"] or user_role == UserRole.MANAGER:
+        # Managers can see all tickets
         pass
     
     # Apply additional filters
@@ -492,6 +503,14 @@ async def rate_ticket(
 ):
     """Rate ticket satisfaction - only once per ticket"""
     user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    # Only citizens can evaluate tickets
+    user_role = user.get("role", "")
+    if user_role != "citizen" and user_role != UserRole.CITIZEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Apenas cidadãos podem avaliar atendimentos"
+        )
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -1179,7 +1198,7 @@ async def rate_knowledge_article(
 
 # ==================== DASHBOARD & METRICS ====================
 
-@router.get("/dashboard", response_model=DashboardMetrics)
+@router.get("/dashboard")
 async def get_dashboard_metrics(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
@@ -1188,15 +1207,17 @@ async def get_dashboard_metrics(
     user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Only support agents, operators and managers can see dashboard
-    if user["role"] not in [UserRole.SUPPORT_AGENT, UserRole.MANAGER, UserRole.MANAGER, UserRole.MANAGER]:
+    user_role = user.get("role", "")
+    allowed_roles = ["support_agent", "operator", "manager"]
+    if user_role not in allowed_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     
     # Ticket metrics
     total_tickets = db.query(SupportTicket).count()
-    open_tickets = db.query(SupportTicket).filter(SupportTicket.status == TicketStatus.OPEN).count()
-    in_progress_tickets = db.query(SupportTicket).filter(SupportTicket.status == TicketStatus.IN_PROGRESS).count()
-    resolved_tickets = db.query(SupportTicket).filter(SupportTicket.status == TicketStatus.RESOLVED).count()
-    closed_tickets = db.query(SupportTicket).filter(SupportTicket.status == TicketStatus.CLOSED).count()
+    open_tickets = db.query(SupportTicket).filter(SupportTicket.status == "open").count()
+    in_progress_tickets = db.query(SupportTicket).filter(SupportTicket.status == "in_progress").count()
+    resolved_tickets = db.query(SupportTicket).filter(SupportTicket.status == "resolved").count()
+    closed_tickets = db.query(SupportTicket).filter(SupportTicket.status == "closed").count()
     
     # Average times (in hours)
     avg_response = db.query(func.avg(
@@ -1221,31 +1242,119 @@ async def get_dashboard_metrics(
         billing=0, technical=0, complaint=0, request=0, information=0, emergency=0
     )
     for category, count in category_counts:
-        setattr(category_metrics, category.value, count)
+        category_str = str(category)
+        if hasattr(category_metrics, category_str):
+            setattr(category_metrics, category_str, count)
+    
+    # Priority metrics - Calculate tickets by priority
+    priority_counts = db.query(
+        SupportTicket.priority, func.count(SupportTicket.id)
+    ).group_by(SupportTicket.priority).all()
+    
+    # Tickets by agent/attendant - Calculate tickets assigned to each agent
+    agent_ticket_counts = db.query(
+        SupportTicket.assigned_agent_id,
+        SupportTicket.assigned_agent_name,
+        func.count(SupportTicket.id).label('ticket_count')
+    ).filter(
+        SupportTicket.assigned_agent_id.isnot(None)
+    ).group_by(
+        SupportTicket.assigned_agent_id,
+        SupportTicket.assigned_agent_name
+    ).order_by(
+        func.count(SupportTicket.id).desc()
+    ).all()
+    
+    # Calculate tickets by status for each agent
+    agent_stats = []
+    for agent_id, agent_name, total_count in agent_ticket_counts:
+        agent_tickets = db.query(SupportTicket).filter(
+            SupportTicket.assigned_agent_id == agent_id
+        ).all()
+        
+        open_count = len([t for t in agent_tickets if str(t.status) == "open"])
+        in_progress_count = len([t for t in agent_tickets if str(t.status) == "in_progress"])
+        resolved_count = len([t for t in agent_tickets if str(t.status) == "resolved"])
+        closed_count = len([t for t in agent_tickets if str(t.status) == "closed"])
+        
+        # Calculate average resolution time for this agent
+        agent_resolved_tickets = [t for t in agent_tickets if t.resolved_at and t.created_at]
+        agent_avg_resolution = 0
+        if agent_resolved_tickets:
+            total_hours = sum([
+                (t.resolved_at - t.created_at).total_seconds() / 3600 
+                for t in agent_resolved_tickets
+            ])
+            agent_avg_resolution = total_hours / len(agent_resolved_tickets)
+        
+        agent_stats.append({
+            "agent_id": agent_id,
+            "agent_name": agent_name or "Não atribuído",
+            "total_tickets": total_count,
+            "open_tickets": open_count,
+            "in_progress_tickets": in_progress_count,
+            "resolved_tickets": resolved_count,
+            "closed_tickets": closed_count,
+            "average_resolution_time": round(agent_avg_resolution, 2)
+        })
     
     # Recent tickets
     recent_tickets = db.query(SupportTicket).order_by(desc(SupportTicket.created_at)).limit(10).all()
     
-    # Top agents
+    # Top agents (by satisfaction)
     top_agents = db.query(SupportAgent).order_by(
         desc(SupportAgent.satisfaction_average)
     ).limit(5).all()
     
-    return DashboardMetrics(
-        ticket_metrics=TicketMetrics(
-            total_tickets=total_tickets,
-            open_tickets=open_tickets,
-            in_progress_tickets=in_progress_tickets,
-            resolved_tickets=resolved_tickets,
-            closed_tickets=closed_tickets,
-            average_response_time=avg_response,
-            average_resolution_time=avg_resolution,
-            satisfaction_average=satisfaction_avg
-        ),
-        category_metrics=category_metrics,
-        recent_tickets=recent_tickets,
-        top_agents=top_agents
-    )
+    return {
+        "ticket_metrics": {
+            "total_tickets": total_tickets,
+            "open_tickets": open_tickets,
+            "in_progress_tickets": in_progress_tickets,
+            "resolved_tickets": resolved_tickets,
+            "closed_tickets": closed_tickets,
+            "average_response_time": round(float(avg_response or 0), 2),
+            "average_resolution_time": round(float(avg_resolution or 0), 2),
+            "satisfaction_average": round(float(satisfaction_avg or 0), 2)
+        },
+        "category_metrics": {
+            "billing": category_metrics.billing,
+            "technical": category_metrics.technical,
+            "complaint": category_metrics.complaint,
+            "request": category_metrics.request,
+            "information": category_metrics.information,
+            "emergency": category_metrics.emergency
+        },
+        "priority_metrics": {
+            str(priority): int(count) for priority, count in priority_counts
+        },
+        "tickets_by_agent": agent_stats,
+        "recent_tickets": [
+            {
+                "id": t.id,
+                "ticket_number": t.ticket_number,
+                "title": t.title,
+                "status": str(t.status),
+                "priority": str(t.priority),
+                "category": str(t.category),
+                "client_name": t.client_name,
+                "assigned_agent_name": t.assigned_agent_name,
+                "created_at": t.created_at.isoformat() if t.created_at else None
+            }
+            for t in recent_tickets
+        ],
+        "top_agents": [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "email": agent.email,
+                "satisfaction_average": float(agent.satisfaction_average or 0),
+                "total_tickets_handled": agent.total_tickets_handled or 0,
+                "average_response_time": agent.average_response_time or 0
+            }
+            for agent in top_agents
+        ]
+    }
 
 @router.get("/agent-dashboard")
 async def get_agent_dashboard_metrics(
@@ -1396,3 +1505,147 @@ async def get_public_ticket(
         created_at=ticket.created_at,
         updated_at=ticket.updated_at
     )
+
+# ==================== REPORTS ====================
+
+class SupportReportFilters(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+    priority: Optional[str] = None
+    assigned_agent_id: Optional[int] = None
+
+@router.post("/reports/support")
+async def generate_support_report(
+    filters: SupportReportFilters,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Generate support tickets report"""
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    # Check permissions - support agents, operators and managers can generate reports
+    user_role = user.get("role", "")
+    allowed_roles = ["support_agent", "operator", "manager"]
+    # Also check string values in case UserRole is not available
+    allowed_role_strings = ["support_agent", "operator", "manager"]
+    if user_role not in allowed_roles and user_role not in allowed_role_strings:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
+    
+    # Validate period
+    if filters.start_date and filters.end_date:
+        period_days = (filters.end_date - filters.start_date).days
+        if period_days < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A data de início deve ser anterior à data de fim"
+            )
+    
+    # Query tickets
+    query = db.query(SupportTicket)
+    
+    if filters.start_date:
+        query = query.filter(SupportTicket.created_at >= filters.start_date)
+    if filters.end_date:
+        query = query.filter(SupportTicket.created_at <= filters.end_date)
+    if filters.status:
+        query = query.filter(SupportTicket.status == filters.status)
+    if filters.category:
+        query = query.filter(SupportTicket.category == filters.category)
+    if filters.priority:
+        query = query.filter(SupportTicket.priority == filters.priority)
+    if filters.assigned_agent_id:
+        query = query.filter(SupportTicket.assigned_agent_id == filters.assigned_agent_id)
+    
+    tickets = query.order_by(desc(SupportTicket.created_at)).all()
+    
+    # Calculate statistics
+    total_tickets = len(tickets)
+    
+    # Status breakdown
+    status_breakdown = {}
+    for ticket in tickets:
+        status_key = ticket.status.value if hasattr(ticket.status, 'value') else str(ticket.status)
+        if status_key not in status_breakdown:
+            status_breakdown[status_key] = {"count": 0}
+        status_breakdown[status_key]["count"] += 1
+    
+    # Category breakdown
+    category_breakdown = {}
+    for ticket in tickets:
+        category_key = ticket.category.value if hasattr(ticket.category, 'value') else str(ticket.category)
+        if category_key not in category_breakdown:
+            category_breakdown[category_key] = {"count": 0}
+        category_breakdown[category_key]["count"] += 1
+    
+    # Priority breakdown
+    priority_breakdown = {}
+    for ticket in tickets:
+        priority_key = ticket.priority.value if hasattr(ticket.priority, 'value') else str(ticket.priority)
+        if priority_key not in priority_breakdown:
+            priority_breakdown[priority_key] = {"count": 0}
+        priority_breakdown[priority_key]["count"] += 1
+    
+    # Average response and resolution times
+    total_response_time = 0
+    total_resolution_time = 0
+    tickets_with_response = 0
+    tickets_with_resolution = 0
+    
+    for ticket in tickets:
+        if ticket.updated_at and ticket.created_at:
+            response_time = (ticket.updated_at - ticket.created_at).total_seconds() / 3600
+            total_response_time += response_time
+            tickets_with_response += 1
+        
+        if ticket.resolved_at and ticket.created_at:
+            resolution_time = (ticket.resolved_at - ticket.created_at).total_seconds() / 3600
+            total_resolution_time += resolution_time
+            tickets_with_resolution += 1
+    
+    avg_response_time = total_response_time / tickets_with_response if tickets_with_response > 0 else 0
+    avg_resolution_time = total_resolution_time / tickets_with_resolution if tickets_with_resolution > 0 else 0
+    
+    # Satisfaction average
+    satisfaction_ratings = [t.satisfaction_rating for t in tickets if t.satisfaction_rating is not None]
+    avg_satisfaction = sum(satisfaction_ratings) / len(satisfaction_ratings) if satisfaction_ratings else 0
+    
+    report_id = generate_protocol_number()
+    
+    return {
+        "report_id": report_id,
+        "filters": filters.dict(),
+        "summary": {
+            "total_tickets": total_tickets,
+            "status_breakdown": status_breakdown,
+            "category_breakdown": category_breakdown,
+            "priority_breakdown": priority_breakdown,
+            "average_response_time_hours": round(avg_response_time, 2),
+            "average_resolution_time_hours": round(avg_resolution_time, 2),
+            "average_satisfaction": round(avg_satisfaction, 2),
+            "period": {
+                "start": filters.start_date.isoformat() if filters.start_date else None,
+                "end": filters.end_date.isoformat() if filters.end_date else None
+            }
+        },
+        "tickets": [
+            {
+                "id": ticket.id,
+                "ticket_number": ticket.ticket_number,
+                "title": ticket.title,
+                "category": ticket.category.value if hasattr(ticket.category, 'value') else str(ticket.category),
+                "priority": ticket.priority.value if hasattr(ticket.priority, 'value') else str(ticket.priority),
+                "status": ticket.status.value if hasattr(ticket.status, 'value') else str(ticket.status),
+                "client_name": ticket.client_name,
+                "assigned_agent_id": ticket.assigned_agent_id,
+                "created_at": ticket.created_at.isoformat(),
+                "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
+                "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+                "satisfaction_rating": ticket.satisfaction_rating
+            }
+            for ticket in tickets[:1000]  # Limit to 1000 for performance
+        ],
+        "generated_at": datetime.now().isoformat(),
+        "generated_by": user.get("name", "Unknown")
+    }

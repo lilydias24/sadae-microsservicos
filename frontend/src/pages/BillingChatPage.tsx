@@ -124,13 +124,44 @@ export function BillingChatPage() {
         params: { category: 'billing', limit: 10 }
       })
       if (Array.isArray(tickets)) {
-        setChatHistory(tickets)
+        // Filter out closed tickets for operators and support agents
+        const isOperator = user?.role === 'operator' || user?.role === 'support_agent'
+        const filteredTickets = isOperator 
+          ? tickets.filter((t: any) => t.status !== 'closed' && t.status?.value !== 'closed')
+          : tickets
+        setChatHistory(filteredTickets)
       } else {
         setChatHistory([])
       }
     } catch (error) {
       console.error('Erro ao carregar histórico:', error)
       setChatHistory([])
+    }
+  }
+
+  const createTicketContextSummary = (ticket: any): ChatMessage => {
+    const statusText = ticket.status?.value || ticket.status || 'Aberto'
+    const categoryText = ticket.category?.value || ticket.category || 'Não especificada'
+    const priorityText = ticket.priority?.value || ticket.priority || 'Média'
+    const createdAt = ticket.created_at ? new Date(ticket.created_at).toLocaleDateString('pt-BR') : 'Data não disponível'
+    
+    const contextSummary = `📋 **Resumo do Ticket ${ticket.ticket_number}**\n\n` +
+      `**Título:** ${ticket.title || 'Sem título'}\n` +
+      `**Descrição:** ${ticket.description ? (ticket.description.length > 200 ? ticket.description.substring(0, 200) + '...' : ticket.description) : 'Sem descrição'}\n` +
+      `**Status:** ${statusText}\n` +
+      `**Categoria:** ${categoryText}\n` +
+      `**Prioridade:** ${priorityText}\n` +
+      `**Criado em:** ${createdAt}\n` +
+      (ticket.assigned_agent_name ? `**Atendente:** ${ticket.assigned_agent_name}\n` : '') +
+      `\n---\n`
+    
+    return {
+      id: `context-${ticket.id}-${Date.now()}`,
+      content: contextSummary,
+      sender: 'bot',
+      timestamp: new Date(ticket.created_at || Date.now()),
+      ticket_id: ticket.id,
+      author_name: 'Sistema'
     }
   }
 
@@ -142,16 +173,35 @@ export function BillingChatPage() {
       
       setCurrentTicketId(ticketId)
       
-      const convertedMessages: ChatMessage[] = ticketMessages.map((msg: any) => ({
-        id: `msg-${msg.id}`,
-        content: msg.content,
-        sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
-        timestamp: new Date(msg.created_at),
-        ticket_id: msg.ticket_id,
-        author_name: msg.author_name
-      }))
+      // Verificar se o ticket está aberto (open ou in_progress)
+      const ticketStatus = ticket.status?.value || ticket.status || 'open'
+      const isOpenTicket = ticketStatus === 'open' || ticketStatus === 'in_progress'
       
-      setMessages(convertedMessages)
+      const convertedMessages: ChatMessage[] = Array.isArray(ticketMessages) && ticketMessages.length > 0
+        ? ticketMessages.map((msg: any) => ({
+            id: `msg-${msg.id}`,
+            content: msg.content,
+            sender: msg.message_type === 'client' ? 'user' : msg.message_type === 'agent' ? 'bot' : 'bot',
+            timestamp: new Date(msg.created_at),
+            ticket_id: msg.ticket_id,
+            author_name: msg.author_name
+          }))
+        : []
+      
+      // Se o ticket está aberto, adicionar o resumo do contexto no início
+      if (isOpenTicket) {
+        const contextMessage = createTicketContextSummary(ticket)
+        // Verificar se já existe uma mensagem de contexto para evitar duplicatas
+        const hasContextMessage = convertedMessages.some(msg => msg.id.startsWith('context-'))
+        if (!hasContextMessage) {
+          setMessages([contextMessage, ...convertedMessages])
+        } else {
+          setMessages(convertedMessages)
+        }
+      } else {
+        setMessages(convertedMessages)
+      }
+      
       setShowHistory(false)
     } catch (error) {
       console.error('Erro ao carregar conversa:', error)
