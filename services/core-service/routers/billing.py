@@ -1044,21 +1044,29 @@ async def resolve_debt_negotiation(
     return {"message": "Negotiation resolved successfully"}
 
 # Payment Processing
-@router.post("/payments", response_model=PaymentResponse)
-async def process_payment(
-    request: Request,
-    payment_data: PaymentCreate,
+@router.post("/bills/{bill_id}/pay", response_model=PaymentResponse)
+async def pay_bill(
+    bill_id: int,
+    req: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Process payment"""
-    authorization = request.headers.get("Authorization")
+    """
+    Pay a bill (simplified endpoint for frontend).
+    """
+    from business.payment_gateway import payment_gateway
+    
+    authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
     
     # Verify bill exists
-    bill = db.query(Bill).filter(Bill.id == payment_data.bill_id).first()
+    bill = db.query(Bill).filter(Bill.id == bill_id).first()
     if not bill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+    
+    # Check if bill is already paid
+    if bill.status == BillStatus.PAID:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bill already paid")
     
     # Citizens can only pay their own bills
     if user["role"] == UserRole.CITIZEN:
@@ -1066,7 +1074,36 @@ async def process_payment(
         if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
-    payment = Payment(**payment_data.dict())
+    # Process payment through gateway mock
+    # Defaulting to credit_card as frontend doesn't provide choice
+    payment_result = await payment_gateway.process_payment(
+        bill_id=bill.id,
+        amount=float(bill.amount),
+        customer_id=bill.customer_id,
+        payment_method="credit_card"
+    )
+    
+    # Check if payment was successful
+    if not payment_result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "message": payment_result["message"],
+                "error_code": payment_result["error_code"],
+                "transaction_id": payment_result["transaction_id"]
+            }
+        )
+    
+    # Payment successful - create payment record
+    payment = Payment(
+        bill_id=bill.id,
+        customer_id=bill.customer_id,
+        amount=bill.amount,
+        payment_method=payment_result["payment_method"],
+        payment_date=datetime.utcnow(),
+        confirmation_number=payment_result["confirmation_number"],
+        transaction_id=payment_result["transaction_id"]
+    )
     db.add(payment)
     
     # Update bill status
@@ -1080,6 +1117,83 @@ async def process_payment(
     background_tasks.add_task(send_payment_confirmation, payment, bill)
     
     return payment
+
+@router.post("/payments", response_model=PaymentResponse)
+async def process_payment(
+    
+    payment_data: PaymentCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Process payment through mock gateway"""
+    from business.payment_gateway import payment_gateway
+    
+    authorization = request.headers.get("Authorization")
+    user = await verify_user_token(authorization)
+    
+    # Verify bill exists
+    bill = db.query(Bill).filter(Bill.id == payment_data.bill_id).first()
+    if not bill:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+    
+    # Check if bill is already paid
+    if bill.status == BillStatus.PAID:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bill already paid")
+    
+    # Citizens can only pay their own bills
+    if user["role"] == UserRole.CITIZEN:
+        customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
+        if not customer or bill.customer_id != customer.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    # Process payment through gateway mock
+    payment_result = await payment_gateway.process_payment(
+        bill_id=bill.id,
+        amount=float(bill.amount),
+        customer_id=bill.customer_id,
+        payment_method=payment_data.payment_method if hasattr(payment_data, 'payment_method') else "credit_card"
+    )
+    
+    # Check if payment was successful
+    if not payment_result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "message": payment_result["message"],
+                "error_code": payment_result["error_code"],
+                "transaction_id": payment_result["transaction_id"]
+            }
+        )
+    
+    # Payment successful - create payment record
+    payment = Payment(
+        bill_id=bill.id,
+        customer_id=bill.customer_id,
+        amount=bill.amount,
+        payment_method=payment_result["payment_method"],
+        payment_date=datetime.utcnow(),
+        confirmation_number=payment_result["confirmation_number"],
+        transaction_id=payment_result["transaction_id"]
+    )
+    db.add(payment)
+    
+    # Update bill status
+    bill.status = BillStatus.PAID
+    bill.paid_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(payment)
+    
+    # Send payment confirmation
+    background_tasks.add_task(send_payment_confirmation, payment, bill)
+    
+    return {
+        "success": True,
+        "message": payment_result["message"],
+        "payment": payment,
+        "confirmation_number": payment_result["confirmation_number"],
+        "transaction_id": payment_result["transaction_id"]
+    }
 
 # Tariff Management
 @router.post("/tariffs", response_model=TariffRateResponse)

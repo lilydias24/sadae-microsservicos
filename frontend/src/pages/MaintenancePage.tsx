@@ -3,6 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { maintenanceDev } from "../services/maintenanceService"
 import { useAuth } from "../contexts/AuthContext"
+import { ServiceOrderKanban } from "../components/ServiceOrderKanban"
+import { ServiceOrderDetailModal } from "../components/ServiceOrderDetailModal"
+import { LayoutGrid, List } from "lucide-react"
 
 interface WorkOrder {
   id: string
@@ -26,6 +29,15 @@ interface Team {
   is_active?: boolean
   max_concurrent_orders?: number
   members?: TeamMember[]
+  specialization?: string
+  supervisor_name?: string
+  supervisor_contact?: string
+  current_workload?: number
+  work_areas?: string[]
+  equipment?: string[]
+  performance_rating?: number
+  completed_orders?: number
+  description?: string
 }
 
 interface Complaint {
@@ -42,6 +54,7 @@ export function MaintenancePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<"orders" | "teams" | "complaints" | "chat">("orders")
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("kanban")
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null)
   const [showCreateOrder, setShowCreateOrder] = useState(false)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -58,10 +71,9 @@ export function MaintenancePage() {
     equipment_csv: "",
   })
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({ name: "", role: "", contact: "" })
-  const [orderDetail, setOrderDetail] = useState<any | null>(null)
-  const [showOrderDetail, setShowOrderDetail] = useState(false)
-  const [orderProgress, setOrderProgress] = useState<any[]>([])
-  const [newProgress, setNewProgress] = useState<{status: WorkOrder["status"], progress_notes: string, estimated_completion?: string}>({ status: "in_progress", progress_notes: "" })
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<WorkOrder | null>(null)
+  const [teamSearchQuery, setTeamSearchQuery] = useState("")
+  const [selectedSpecialization, setSelectedSpecialization] = useState<string>("all")
   
   // Estados para tags dinâmicas
   const [workAreaTags, setWorkAreaTags] = useState<string[]>([])
@@ -183,6 +195,58 @@ export function MaintenancePage() {
     }
   }
 
+  // Delete team mutation
+  const deleteTeamMutation = useMutation({
+    mutationFn: (teamId: string) => maintenanceDev.deleteTeam(Number(teamId)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["teams"] })
+    },
+  })
+
+  const handleDeleteTeam = (team: Team) => {
+    if (team.current_workload && team.current_workload > 0) {
+      alert("Não é possível apagar uma equipe com ordens de serviço em andamento")
+      return
+    }
+    // eslint-disable-next-line no-restricted-globals
+    if (confirm(`Tem certeza que deseja apagar a equipe "${team.name}"?`)) {
+      deleteTeamMutation.mutate(team.id)
+    }
+  }
+
+  // Get specialization color
+  const getSpecializationColor = (specialization?: string) => {
+    if (!specialization) return "bg-gray-100 border-gray-300"
+    
+    const colors: Record<string, string> = {
+      "🚰 Hidráulica": "bg-blue-50 border-blue-300",
+      "⚡ Elétrica": "bg-yellow-50 border-yellow-300",
+      "🏗️ Civil / Estrutural": "bg-orange-50 border-orange-300",
+      "🌳 Paisagismo": "bg-green-50 border-green-300",
+      "🧹 Limpeza Urbana": "bg-cyan-50 border-cyan-300",
+      "🚦 Sinalização": "bg-red-50 border-red-300",
+      "🔧 Manutenção Geral": "bg-purple-50 border-purple-300",
+    }
+    
+    return colors[specialization] || "bg-gray-100 border-gray-300"
+  }
+
+  const getSpecializationBadgeColor = (specialization?: string) => {
+    if (!specialization) return "bg-gray-100 text-gray-700"
+    
+    const colors: Record<string, string> = {
+      "🚰 Hidráulica": "bg-blue-100 text-blue-700",
+      "⚡ Elétrica": "bg-yellow-100 text-yellow-700",
+      "🏗️ Civil / Estrutural": "bg-orange-100 text-orange-700",
+      "🌳 Paisagismo": "bg-green-100 text-green-700",
+      "🧹 Limpeza Urbana": "bg-cyan-100 text-cyan-700",
+      "🚦 Sinalização": "bg-red-100 text-red-700",
+      "🔧 Manutenção Geral": "bg-purple-100 text-purple-700",
+    }
+    
+    return colors[specialization] || "bg-gray-100 text-gray-700"
+  }
+
   const createTeamMutation = useMutation({
     mutationFn: (data: any) => maintenanceDev.createTeam(data),
     onSuccess: () => {
@@ -207,16 +271,8 @@ export function MaintenancePage() {
     }
   })
 
-  const openOrderDetail = async (order: WorkOrder) => {
-    try {
-      const res = await maintenanceDev.getWorkOrder(parseInt(order.id))
-      setOrderDetail(res.data)
-      const prog = await maintenanceDev.getOrderProgress(parseInt(order.id))
-      setOrderProgress(Array.isArray(prog.data) ? prog.data : [])
-      setShowOrderDetail(true)
-    } catch (e) {
-      console.error(e)
-    }
+  const openOrderDetail = (order: WorkOrder) => {
+    setSelectedOrderForDetail(order)
   }
 
   // Mapeamento de status e prioridades para exibição
@@ -494,84 +550,248 @@ export function MaintenancePage() {
 
       {/* Content */}
       {activeTab === "orders" && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
+        <div className="space-y-4">
+          {/* View Toggle */}
+          <div className="flex justify-between items-center bg-white rounded-lg shadow px-6 py-3">
             <h3 className="text-lg font-semibold text-gray-900">Ordens de Serviço</h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  viewMode === "list"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <List className="w-4 h-4" />
+                Lista
+              </button>
+              <button
+                onClick={() => setViewMode("kanban")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  viewMode === "kanban"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                Kanban
+              </button>
+            </div>
           </div>
-          <div className="divide-y divide-gray-200">
-            {loadingOrders ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                Carregando ordens de serviço...
-              </div>
-            ) : workOrders.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                Nenhuma ordem de serviço encontrada.
-              </div>
-            ) : (
-              workOrders.map((order: WorkOrder) => (
-                <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3">
-                        <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
-                        >
-                          {priorityDisplayMapping[order.priority as keyof typeof priorityDisplayMapping] || order.priority}
-                        </span>
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
-                        >
-                          {statusDisplayMapping[order.status as keyof typeof statusDisplayMapping] || order.status}
-                        </span>
+
+          {loadingOrders ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              Carregando ordens de serviço...
+            </div>
+          ) : workOrders.length === 0 ? (
+            <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              Nenhuma ordem de serviço encontrada.
+            </div>
+          ) : viewMode === "kanban" ? (
+            <ServiceOrderKanban orders={workOrders} onOrderClick={openOrderDetail} />
+          ) : (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="divide-y divide-gray-200">
+                {workOrders.map((order: WorkOrder) => (
+                  <div key={order.id} className="px-6 py-4 hover:bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3">
+                          <h4 className="text-sm font-medium text-gray-900">{order.title}</h4>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(order.priority)}`}
+                          >
+                            {priorityDisplayMapping[order.priority as keyof typeof priorityDisplayMapping] || order.priority}
+                          </span>
+                          <span
+                            className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(order.status)}`}
+                          >
+                            {statusDisplayMapping[order.status as keyof typeof statusDisplayMapping] || order.status}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">{order.description}</p>
+                        <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                          <span>📍 {order.location}</span>
+                          <span>⏱️ {order.estimated_duration}h</span>
+                          <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
+                        </div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-1">{order.description}</p>
-                      <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                        <span>📍 {order.location}</span>
-                        <span>⏱️ {order.estimated_duration}h</span>
-                        <span>📅 {new Date(order.created_at).toLocaleDateString()}</span>
+                      <div className="flex items-center space-x-2">
+                        {order.status === "open" && (
+                          <button
+                            onClick={() => setSelectedOrder(order)}
+                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Atribuir Equipe
+                          </button>
+                        )}
+                        <button onClick={() => openOrderDetail(order)} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Ver Detalhes</button>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      {order.status === "open" && (
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Atribuir Equipe
-                        </button>
-                      )}
-                      <button onClick={() => openOrderDetail(order)} className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Ver Detalhes</button>
                     </div>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === "teams" && (
         <div className="space-y-4">
-          <div className="flex justify-end">
-            <button onClick={() => setShowCreateTeam(true)} className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Nova Equipe</button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {teams.map((team: Team) => (
-            <div key={team.id} className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">{team.name}</h3>
-                <span
-                  className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                    team.status === "available" ? "text-green-600 bg-green-100" : "text-red-600 bg-red-100"
-                  }`}
-                >
-                  {team.status === "available" ? "Disponível" : "Ocupado"}
-                </span>
+          {/* Header com busca, filtros e botão de criar */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+              {/* Busca e Filtros */}
+              <div className="flex-1 w-full lg:w-auto flex flex-col sm:flex-row gap-3">
+                {/* Campo de busca */}
+                <div className="relative flex-1 min-w-[250px]">
+                  <svg 
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Buscar equipe por nome, supervisor..."
+                    value={teamSearchQuery}
+                    onChange={(e) => setTeamSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  />
+                  {teamSearchQuery && (
+                    <button
+                      onClick={() => setTeamSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filtro por especialização */}
+                <div className="relative min-w-[200px]">
+                  <svg 
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  <select
+                    value={selectedSpecialization}
+                    onChange={(e) => setSelectedSpecialization(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition appearance-none bg-white cursor-pointer"
+                  >
+                    <option value="all">Todas Especializações</option>
+                    <option value="🚰 Hidráulica">🚰 Hidráulica</option>
+                    <option value="⚡ Elétrica">⚡ Elétrica</option>
+                    <option value="🏗️ Civil / Estrutural">🏗️ Civil / Estrutural</option>
+                    <option value="🌳 Paisagismo">🌳 Paisagismo</option>
+                    <option value="🧹 Limpeza Urbana">🧹 Limpeza Urbana</option>
+                    <option value="🚦 Sinalização">🚦 Sinalização</option>
+                    <option value="🔧 Manutenção Geral">🔧 Manutenção Geral</option>
+                  </select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center text-sm text-gray-600">
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+              {/* Botão Nova Equipe */}
+              <button 
+                onClick={() => setShowCreateTeam(true)} 
+                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-medium shadow-lg shadow-blue-500/30 transition flex items-center whitespace-nowrap"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Nova Equipe
+              </button>
+            </div>
+
+            {/* Info de resultados */}
+            {(teamSearchQuery || selectedSpecialization !== "all") && (
+              <div className="mt-3 text-sm text-gray-600">
+                Mostrando {teams.filter((team: Team) => {
+                  const matchesSearch = !teamSearchQuery || 
+                    team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                    (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+                  const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+                  return matchesSearch && matchesSpecialization;
+                }).length} de {teams.length} equipes
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {teams
+            .filter((team: Team) => {
+              const matchesSearch = !teamSearchQuery || 
+                team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+              const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+              return matchesSearch && matchesSpecialization;
+            })
+            .map((team: Team) => (
+            <div 
+              key={team.id} 
+              className={`rounded-xl shadow-lg border-2 transition-all hover:shadow-xl ${
+                getSpecializationColor(team.specialization)
+              }`}
+            >
+              {/* Header com cor por especialização */}
+              <div className="p-5 border-b border-gray-200">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">{team.name}</h3>
+                    {team.specialization && (
+                      <span className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+                        getSpecializationBadgeColor(team.specialization)
+                      }`}>
+                        {team.specialization}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className={`inline-flex px-3 py-1 text-xs font-bold rounded-full shrink-0 ml-2 ${
+                      team.status === "available" ? "text-green-700 bg-green-100 border border-green-300" : "text-red-700 bg-red-100 border border-red-300"
+                    }`}
+                  >
+                    {team.status === "available" ? "✓ Disponível" : "⏱ Ocupado"}
+                  </span>
+                </div>
+                
+                {/* Workload Progress */}
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                    <span className="font-medium">Ordens de Serviço</span>
+                    <span className="font-bold">
+                      {team.current_workload || 0}/{team.max_concurrent_orders || 5}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all ${
+                        (team.current_workload || 0) >= (team.max_concurrent_orders || 5)
+                          ? "bg-red-500"
+                          : (team.current_workload || 0) > (team.max_concurrent_orders || 5) * 0.7
+                          ? "bg-yellow-500"
+                          : "bg-green-500"
+                      }`}
+                      style={{ width: `${Math.min(((team.current_workload || 0) / (team.max_concurrent_orders || 5)) * 100, 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 space-y-3">
+                {/* Membros */}
+                <div className="flex items-center text-sm text-gray-700">
+                  <svg className="w-5 h-5 mr-2.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -579,15 +799,141 @@ export function MaintenancePage() {
                       d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
                     />
                   </svg>
-                  {team.members_count} membros
+                  <span className="font-medium">{team.members_count || 0} membros</span>
                 </div>
-                <div className="pt-2">
-                  <button onClick={() => { setEditingTeam(team); setTeamForm({ name: team.name, description: '', specialization: '', max_concurrent_orders: team.max_concurrent_orders || 5, supervisor_name: '', supervisor_contact: '', work_areas_csv: '', equipment_csv: '', members_count: team.members_count || 0 }) }} className="text-sm px-3 py-1 border rounded">Editar</button>
-                </div>
+
+                {/* Supervisor */}
+                {team.supervisor_name && (
+                  <div className="flex items-center text-sm text-gray-700">
+                    <svg className="w-5 h-5 mr-2.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span className="truncate">{team.supervisor_name}</span>
+                  </div>
+                )}
+
+                {/* Áreas de atuação */}
+                {team.work_areas && team.work_areas.length > 0 && (
+                  <div className="flex items-start text-sm text-gray-700">
+                    <svg className="w-5 h-5 mr-2.5 text-gray-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap gap-1">
+                        {team.work_areas.slice(0, 2).map((area, idx) => (
+                          <span key={idx} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full border border-gray-300">
+                            {area}
+                          </span>
+                        ))}
+                        {team.work_areas.length > 2 && (
+                          <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full border border-gray-300">
+                            +{team.work_areas.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Equipamentos */}
+                {team.equipment && team.equipment.length > 0 && (
+                  <div className="flex items-start text-sm text-gray-700">
+                    <svg className="w-5 h-5 mr-2.5 text-gray-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                    </svg>
+                    <div className="flex-1">
+                      <span className="text-xs text-gray-600">
+                        {team.equipment.length} equipamento{team.equipment.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Performance */}
+                {team.completed_orders !== undefined && team.completed_orders > 0 && (
+                  <div className="flex items-center text-sm text-gray-700 pt-2 border-t border-gray-200">
+                    <svg className="w-5 h-5 mr-2.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium">{team.completed_orders} ordens concluídas</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer com ações */}
+              <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 rounded-b-xl flex items-center justify-between">
+                <button 
+                  onClick={() => { 
+                    setEditingTeam(team); 
+                    setTeamForm({ 
+                      name: team.name, 
+                      description: team.description || '', 
+                      specialization: team.specialization || '', 
+                      max_concurrent_orders: team.max_concurrent_orders || 5, 
+                      supervisor_name: team.supervisor_name || '', 
+                      supervisor_contact: team.supervisor_contact || '', 
+                      work_areas_csv: team.work_areas?.join(', ') || '', 
+                      equipment_csv: team.equipment?.join(', ') || '', 
+                      members_count: team.members_count || 0 
+                    }) 
+                  }} 
+                  className="flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
+                >
+                  <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  Editar
+                </button>
+                
+                {(team.current_workload === undefined || team.current_workload === 0) && (
+                  <button 
+                    onClick={() => handleDeleteTeam(team)}
+                    disabled={deleteTeamMutation.isPending}
+                    className="flex items-center px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Apagar
+                  </button>
+                )}
               </div>
             </div>
           ))}
           </div>
+
+          {/* Mensagem quando não há resultados */}
+          {teams
+            .filter((team: Team) => {
+              const matchesSearch = !teamSearchQuery || 
+                team.name.toLowerCase().includes(teamSearchQuery.toLowerCase()) ||
+                (team.supervisor_name && team.supervisor_name.toLowerCase().includes(teamSearchQuery.toLowerCase()));
+              const matchesSpecialization = selectedSpecialization === "all" || team.specialization === selectedSpecialization;
+              return matchesSearch && matchesSpecialization;
+            }).length === 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+              <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhuma equipe encontrada</h3>
+              <p className="text-gray-600 mb-4">
+                {teamSearchQuery 
+                  ? `Não encontramos equipes correspondentes a "${teamSearchQuery}"`
+                  : "Não encontramos equipes com essa especialização"
+                }
+              </p>
+              <button
+                onClick={() => {
+                  setTeamSearchQuery("");
+                  setSelectedSpecialization("all");
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                Limpar Filtros
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1234,61 +1580,12 @@ export function MaintenancePage() {
       )}
 
       {/* Order Detail Modal */}
-      {showOrderDetail && orderDetail && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900">Detalhes da OS - {orderDetail.title}</h3>
-            <div className="mt-3 text-sm space-y-1">
-              <div><b>Protocolo:</b> {orderDetail.protocol_number}</div>
-              <div><b>Status:</b> {orderDetail.status}</div>
-              <div><b>Prioridade:</b> {orderDetail.priority}</div>
-              <div><b>Equipe:</b> {orderDetail.assigned_team || '—'}</div>
-              <div><b>Local:</b> {orderDetail.location}</div>
-              <div className="pt-2"><b>Descrição:</b> {orderDetail.description}</div>
-              <div className="text-xs text-gray-500 pt-2">Criado em {new Date(orderDetail.created_at).toLocaleString()}</div>
-            </div>
-            <div className="mt-4 border-t pt-3">
-              <h4 className="font-semibold mb-2">Andamentos</h4>
-              <div className="max-h-40 overflow-auto space-y-2">
-                {orderProgress.map((p: any) => (
-                  <div key={p.id} className="border rounded px-2 py-1 text-sm">
-                    <div className="flex justify-between">
-                      <div className="font-medium">{p.status}</div>
-                      <div className="text-xs text-gray-500">{new Date(p.created_at).toLocaleString()}</div>
-                    </div>
-                    <div className="text-gray-700">{p.progress_notes}</div>
-                    {p.created_by_name && <div className="text-xs text-gray-500">por {p.created_by_name}</div>}
-                  </div>
-                ))}
-                {orderProgress.length === 0 && <div className="text-sm text-gray-500">Sem andamentos.</div>}
-              </div>
-              <form
-                className="mt-3 grid grid-cols-1 gap-2"
-                onSubmit={async (e) => {
-                  e.preventDefault()
-                  await maintenanceDev.addOrderProgress(orderDetail.id, newProgress)
-                  const prog = await maintenanceDev.getOrderProgress(orderDetail.id)
-                  setOrderProgress(Array.isArray(prog.data) ? prog.data : [])
-                  const updated = await maintenanceDev.getWorkOrder(orderDetail.id)
-                  setOrderDetail(updated.data)
-                  setNewProgress({ status: "in_progress", progress_notes: "" })
-                }}
-              >
-                <select className="border rounded px-2 py-1" value={newProgress.status} onChange={(e) => setNewProgress({ ...newProgress, status: e.target.value as any })}>
-                  <option value="in_progress">Em progresso</option>
-                  <option value="completed">Concluída</option>
-                </select>
-                <textarea className="border rounded px-2 py-1" placeholder="Notas de andamento" value={newProgress.progress_notes} onChange={(e) => setNewProgress({ ...newProgress, progress_notes: e.target.value })} required />
-                <div className="flex justify-end">
-                  <button type="submit" className="px-3 py-1 bg-blue-600 text-white rounded">Adicionar Andamento</button>
-                </div>
-              </form>
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowOrderDetail(false)} className="px-3 py-1 border rounded">Fechar</button>
-            </div>
-          </div>
-        </div>
+      {selectedOrderForDetail && (
+        <ServiceOrderDetailModal
+          order={selectedOrderForDetail}
+          onClose={() => setSelectedOrderForDetail(null)}
+          onUpdate={() => queryClient.invalidateQueries({ queryKey: ['workOrders'] })}
+        />
       )}
     </div>
   )

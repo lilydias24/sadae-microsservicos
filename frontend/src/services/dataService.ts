@@ -42,7 +42,7 @@ class DataService {
     if (appConfig.useRealData) {
       try {
         const response = await api.get('/billing/bills')
-        
+
         if (!Array.isArray(response.data)) {
           console.warn('Response data is not an array, using mock data')
           if (appConfig.useMockFallback) {
@@ -50,7 +50,7 @@ class DataService {
           }
           throw new Error('Invalid response format')
         }
-        
+
         console.log('✅ Using real data from API:', response.data.length, 'bills')
         return response.data.map(this.transformBillFromAPI)
       } catch (error: any) {
@@ -96,6 +96,55 @@ class DataService {
     }
   }
 
+  // Pay Bill
+  async payBill(billId: string): Promise<any> {
+    if (appConfig.useRealData) {
+      try {
+        // Backend espera ID numérico; quando recebemos no frontend ele vem como "bill-XXX-2024"
+        // Tentamos extrair o número central; se não der, usamos como veio (para compatibilidade)
+        let idForApi: string | number = billId
+        const parts = billId.split('-')
+        if (parts.length >= 3) {
+          const maybeNum = parseInt(parts[1], 10)
+          if (!Number.isNaN(maybeNum)) idForApi = maybeNum
+        }
+
+        const response = await api.post(`/billing/bills/${idForApi}/pay`)
+        return response.data
+      } catch (error) {
+        console.error('Failed to pay bill via API:', error)
+        if (appConfig.useMockFallback) {
+          console.warn('Falling back to mock payment')
+          // Fallthrough to mock implementation
+        } else {
+          throw error
+        }
+      }
+    }
+
+    // Mock implementation
+    const billIndex = mockBills.findIndex(b => b.id === billId)
+    if (billIndex !== -1) {
+      // Update the mock data in memory
+      const bill = mockBills[billIndex] as any
+      bill.status = 'paid'
+
+      return {
+        success: true,
+        message: 'Payment processed successfully (Mock)',
+        payment: {
+          id: Math.floor(Math.random() * 1000),
+          bill_id: billId,
+          amount: bill.amount,
+          status: 'completed',
+          created_at: new Date().toISOString()
+        }
+      }
+    }
+
+    throw new Error('Bill not found in mock data')
+  }
+
   // Bill Disputes
   async getBillDisputes(): Promise<BillDispute[]> {
     if (appConfig.useRealData) {
@@ -135,7 +184,7 @@ class DataService {
         throw error
       }
     }
-    
+
     // Mock implementation
     const newDispute: BillDispute = {
       id: `dispute-${Date.now()}`,
@@ -185,8 +234,8 @@ class DataService {
   }
 
   async createDebtNegotiation(
-    customerId: string, 
-    totalDebt: number, 
+    customerId: string,
+    totalDebt: number,
     installments: number
   ): Promise<DebtNegotiation> {
     if (appConfig.useRealData) {

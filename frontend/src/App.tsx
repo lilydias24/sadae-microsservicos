@@ -10,12 +10,15 @@ import { LoginPage } from "./pages/LoginPage"
 import { ResetPasswordPage } from "./pages/ResetPasswordPage"
 import { DashboardPage } from "./pages/DashboardPage"
 import { BillingPage } from "./pages/BillingPage"
+import { BillingChatPage } from "./pages/BillingChatPage"
 import { MaintenancePage } from "./pages/MaintenancePage"
+import { MaintenanceChatPage } from "./pages/MaintenanceChatPage"
 import { MonitoringPage } from "./pages/MonitoringPage"
 import { SupportPage } from "./pages/SupportPage"
 import { ChatPage } from "./pages/ChatPage"
 import { ProfilePage } from "./pages/ProfilePage"
 import { ReportsPage } from "./pages/ReportsPage"
+import PaymentSuccessPage from "./pages/PaymentSuccess"
 
 import "./index.css"
 
@@ -41,6 +44,7 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/forgot-password" element={<ResetPasswordPage />} />
                 <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+                <Route path="/payment/success" element={<PaymentSuccessPage />} />
 
                 {/* Protected routes */}
                 <Route
@@ -109,6 +113,26 @@ function App() {
                     <ProtectedRoute>
                       <Layout showChatWidget={false}>
                         <ChatPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/billing-chat"
+                  element={
+                    <ProtectedRoute>
+                      <Layout showChatWidget={false}>
+                        <BillingChatPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/maintenance-chat"
+                  element={
+                    <ProtectedRoute>
+                      <Layout showChatWidget={false}>
+                        <MaintenanceChatPage />
                       </Layout>
                     </ProtectedRoute>
                   }
