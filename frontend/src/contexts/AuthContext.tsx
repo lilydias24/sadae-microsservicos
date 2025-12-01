@@ -23,6 +23,7 @@ interface AuthContextType {
   logout: () => void
   updateUser: (userData: Partial<User>) => void
   isLoading: boolean
+  checkTokenValidity: () => boolean
 }
 
 interface RegisterData {
@@ -161,6 +162,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.removeItem("user")
   }
 
+  const checkTokenValidity = (): boolean => {
+    const storedToken = localStorage.getItem("token")
+    
+    if (!storedToken) {
+      return false
+    }
+
+    try {
+      // Decode JWT token to check expiration
+      const tokenParts = storedToken.split('.')
+      if (tokenParts.length !== 3) {
+        return false
+      }
+
+      const payload = JSON.parse(atob(tokenParts[1]))
+      const expirationTime = payload.exp * 1000 // Convert to milliseconds
+      const currentTime = Date.now()
+
+      // Check if token is expired
+      if (currentTime >= expirationTime) {
+        // Token expired, logout user
+        logout()
+        return false
+      }
+
+      return true
+    } catch (error) {
+      console.error("Error validating token:", error)
+      logout()
+      return false
+    }
+  }
+
   const updateUser = (userData: Partial<User>) => {
     if (user) {
       const updatedUser = { ...user, ...userData }
@@ -177,6 +211,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     logout,
     updateUser,
     isLoading,
+    checkTokenValidity,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

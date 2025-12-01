@@ -108,6 +108,7 @@ export function MonitoringPage() {
   const [anomaliesLimit, setAnomaliesLimit] = useState<number>(20)
   const [isUpdating, setIsUpdating] = useState<number | null>(null)
 
+
   // Estados para observações (RF004)
   const [showObservationModal, setShowObservationModal] = useState(false)
   const [selectedReading, setSelectedReading] = useState<{ sensor_id: string; reading_id?: number; timestamp: string } | null>(null)
@@ -162,6 +163,7 @@ export function MonitoringPage() {
       const reading = lastMessage.data
       console.log("📡 WebSocket: Nova leitura recebida!", reading)
 
+
       // Atualizar gráfico em tempo real
       setRealtimeData(prev => {
         const newData = [...prev, { value: Number(reading.value), timestamp: reading.timestamp }]
@@ -169,6 +171,7 @@ export function MonitoringPage() {
         return newData.slice(-50)
       })
     }
+
 
     if (lastMessage && lastMessage.type === "anomaly_detected") {
       console.log("⚠️ WebSocket: Nova anomalia detectada!", lastMessage.data)
@@ -281,7 +284,9 @@ export function MonitoringPage() {
   const handleSubmitObservation = async (e: React.FormEvent) => {
     e.preventDefault()
 
+
     if (!selectedReading) return
+
 
     // Validação: 10-500 caracteres
     if (observationText.length < 10) {
@@ -303,10 +308,12 @@ export function MonitoringPage() {
         timestamp: selectedReading.timestamp
       })
 
+
       alert("Observação registrada com sucesso!")
       setShowObservationModal(false)
       setObservationText("")
       setSelectedReading(null)
+
 
       // Recarregar observações se necessário
       // loadObservations()
@@ -317,6 +324,7 @@ export function MonitoringPage() {
       setIsSubmittingObservation(false)
     }
   }
+
 
   // Filtrando os sensores mocados com base no seletor
   const filteredSensors = selectedSensorType === "all"
@@ -393,6 +401,7 @@ export function MonitoringPage() {
   const translateAnomalyDescription = (description: string): string => {
     if (!description) return ""
 
+
     // Traduzir descrições automáticas em inglês
     if (description.toLowerCase().includes("automatic anomaly detection")) {
       // Padrão 1: "Automatic anomaly detection: river_level value 2.21 exceeds threshold"
@@ -400,11 +409,13 @@ export function MonitoringPage() {
       const typeMatch = description.match(/(river_level|precipitation|flow|water_quality|pressure|level|quality)\s+value\s+([0-9.]+)/i)
       const thresholdMatch = description.match(/exceeds\s+threshold/i)
 
+
       if (typeMatch && thresholdMatch) {
         const sensorType = translateSensorType(typeMatch[1])
         const value = typeMatch[2]
         return `Detecção automática de anomalia: ${sensorType} com valor ${value} excede o limiar`
       }
+
 
       // Tradução genérica com substituições
       return description
@@ -699,6 +710,7 @@ export function MonitoringPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
               />
             </div>
+
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">

@@ -14,6 +14,10 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     SUPPORT_AGENT = "support_agent"
     MANAGER = "manager"
+    OPERATOR = "operator"
+    MAINTENANCE_MANAGER = "maintenance_manager"
+    FINANCIAL_MANAGER = "financial_manager"
+    CRISIS_MANAGER = "crisis_manager"
 
 def generate_protocol_number() -> str:
     """Generate a unique protocol number"""

@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import ReactQuill from 'react-quill'
+import 'react-quill/dist/quill.snow.css'
 import { 
   MessageSquare, 
   Plus, 
@@ -24,6 +26,7 @@ import {
   EyeOff,
   MessageCircle
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 interface SupportTicket {
   id: number
@@ -39,6 +42,7 @@ interface SupportTicket {
   created_at: string
   updated_at?: string
   satisfaction_rating?: number
+  satisfaction_comment?: string
   evaluation?: {
     rating: number
     comment: string
@@ -89,6 +93,42 @@ const statusColors: Record<string, string> = {
   closed: 'bg-gray-100 text-gray-800'
 }
 
+// Função para traduzir status para português
+const translateStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'open': 'Aberto',
+    'in_progress': 'Em Andamento',
+    'waiting_client': 'Aguardando Cliente',
+    'resolved': 'Resolvido',
+    'closed': 'Fechado'
+  }
+  return statusMap[status] || status.replace('_', ' ')
+}
+
+// Função para traduzir prioridade para português
+const translatePriority = (priority: string): string => {
+  const priorityMap: Record<string, string> = {
+    'low': 'Baixa',
+    'medium': 'Média',
+    'high': 'Alta',
+    'urgent': 'Urgente'
+  }
+  return priorityMap[priority] || priority
+}
+
+// Função para traduzir categoria para português
+const translateCategory = (category: string): string => {
+  const categoryMap: Record<string, string> = {
+    'billing': 'Faturamento',
+    'technical': 'Técnico',
+    'complaint': 'Reclamação',
+    'request': 'Solicitação',
+    'information': 'Informação',
+    'emergency': 'Emergência'
+  }
+  return categoryMap[category] || category
+}
+
 const priorityColors: Record<string, string> = {
   low: 'bg-gray-100 text-gray-800',
   medium: 'bg-yellow-100 text-yellow-800',
@@ -98,6 +138,7 @@ const priorityColors: Record<string, string> = {
 
 export function SupportPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('tickets')
   const [tickets, setTickets] = useState<SupportTicket[]>([])
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeArticle[]>([])
@@ -223,7 +264,12 @@ export function SupportPage() {
         created_at: ticket.created_at || new Date().toISOString(),
         updated_at: ticket.updated_at || null,
         satisfaction_rating: ticket.satisfaction_rating || null,
-        evaluation: ticket.evaluation || null
+        satisfaction_comment: ticket.satisfaction_comment || null,
+        evaluation: ticket.evaluation || (ticket.satisfaction_rating ? {
+          rating: ticket.satisfaction_rating,
+          comment: ticket.satisfaction_comment || '',
+          evaluated_at: ticket.updated_at || ticket.created_at || new Date().toISOString()
+        } : null)
       }))
       
       console.log('✅ Tickets normalizados:', normalizedTickets)
@@ -440,13 +486,60 @@ export function SupportPage() {
     return () => clearInterval(interval)
   }, [selectedTicket?.id])
 
+  // Auto-refresh ticket status when ticket is selected (for immediate status updates)
+  useEffect(() => {
+    if (!selectedTicket?.id) return
+    
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/support/tickets/${selectedTicket.id}`)
+        // Update selected ticket if status changed
+        if (data.status !== selectedTicket.status) {
+          setSelectedTicket(prev => prev ? { ...prev, status: data.status } : null)
+          // Also update in tickets list
+          setTickets(prev => prev.map(ticket => 
+            ticket.id === selectedTicket.id 
+              ? { ...ticket, status: data.status }
+              : ticket
+          ))
+        }
+      } catch (error) {
+        console.error('Error refreshing ticket status:', error)
+      }
+    }, 2000) // Check every 2 seconds for status updates
+    
+    return () => clearInterval(interval)
+  }, [selectedTicket?.id, selectedTicket?.status])
+
   const createTicket = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       setLoading(true)
-      console.log('📝 Criando ticket com dados:', newTicket)
       
-      const response = await api.post('/support/tickets', newTicket)
+      // Validação básica no frontend
+      if (!newTicket.title || newTicket.title.trim().length < 5) {
+        alert('O título deve ter pelo menos 5 caracteres')
+        setLoading(false)
+        return
+      }
+      
+      if (!newTicket.description || newTicket.description.trim().length < 10) {
+        alert('A descrição deve ter pelo menos 10 caracteres')
+        setLoading(false)
+        return
+      }
+      
+      // Preparar dados para envio
+      const ticketData = {
+        title: newTicket.title.trim(),
+        description: newTicket.description.trim(),
+        category: newTicket.category,
+        priority: newTicket.priority
+      }
+      
+      console.log('📝 Criando ticket com dados:', ticketData)
+      
+      const response = await api.post('/support/tickets', ticketData)
       console.log('✅ Ticket criado com sucesso:', response.data)
       
       // Normalizar o ticket criado para o formato esperado
@@ -499,8 +592,39 @@ export function SupportPage() {
         request: error.config
       })
       
-      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'Erro desconhecido'
-      alert(`Não foi possível criar o ticket: ${errorMessage}`)
+      // Extrair mensagem de erro de forma mais detalhada
+      let errorMessage = 'Erro desconhecido'
+      
+      if (error.response?.data) {
+        const errorData = error.response.data
+        
+        // FastAPI retorna erros de validação em formato específico
+        if (Array.isArray(errorData.detail)) {
+          // Erro de validação do FastAPI
+          const validationErrors = errorData.detail.map((err: any) => {
+            const field = err.loc?.join('.') || 'campo'
+            const msg = err.msg || 'erro de validação'
+            return `${field}: ${msg}`
+          }).join('\n')
+          errorMessage = `Erro de validação:\n${validationErrors}`
+        } else if (errorData.detail) {
+          errorMessage = typeof errorData.detail === 'string' 
+            ? errorData.detail 
+            : JSON.stringify(errorData.detail)
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+      
+      console.error('❌ Erro completo:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: errorMessage
+      })
+      
+      alert(`Não foi possível criar o ticket:\n${errorMessage}`)
     } finally {
       setLoading(false)
     }
@@ -511,7 +635,13 @@ export function SupportPage() {
     if (!selectedTicket || !newMessage.trim()) return
 
     try {
-      await api.post(`/support/tickets/${selectedTicket.id}/messages`, { content: newMessage })
+      // Remove HTML tags for plain text version, but send HTML to backend
+      const plainText = newMessage.replace(/<[^>]*>/g, '').trim()
+      if (!plainText) return
+
+      await api.post(`/support/tickets/${selectedTicket.id}/messages`, { 
+        content: newMessage // Send HTML content
+      })
       setNewMessage('')
       setAiSuggestion(null) // Limpar sugestão após enviar
       
@@ -536,6 +666,33 @@ export function SupportPage() {
       }
     } catch (error) {
       console.error('Error sending message:', error)
+    }
+  }
+
+  // Update ticket status
+  const updateTicketStatus = async (ticketId: number, newStatus: string) => {
+    try {
+      await api.put(`/support/tickets/${ticketId}`, { status: newStatus })
+      
+      // Update local state immediately
+      setTickets(prev => prev.map(ticket => 
+        ticket.id === ticketId 
+          ? { ...ticket, status: newStatus }
+          : ticket
+      ))
+      
+      // Update selected ticket if it's the one being updated
+      if (selectedTicket?.id === ticketId) {
+        setSelectedTicket(prev => prev ? { ...prev, status: newStatus } : null)
+      }
+      
+      // Refresh tickets list to ensure consistency
+      setTimeout(() => {
+        fetchTickets()
+      }, 500)
+    } catch (error) {
+      console.error('Error updating ticket status:', error)
+      alert('Erro ao atualizar status do ticket')
     }
   }
 
@@ -643,25 +800,46 @@ export function SupportPage() {
     if (!selectedTicket) return
 
     try {
-      await api.post(`/support/tickets/${selectedTicket.id}/evaluate`, evaluationForm)
+      const response = await api.post(`/support/tickets/${selectedTicket.id}/evaluate`, evaluationForm)
+      
+      // Update local state with the evaluation
+      const updatedEvaluation = {
+        rating: evaluationForm.rating,
+        comment: evaluationForm.comment,
+        evaluated_at: new Date().toISOString()
+      }
+      
       setTickets(prev => prev.map(ticket => 
           ticket.id === selectedTicket.id 
             ? {
                 ...ticket,
-                evaluation: {
-                  rating: evaluationForm.rating,
-                  comment: evaluationForm.comment,
-                  evaluated_at: new Date().toISOString()
-                }
+                satisfaction_rating: evaluationForm.rating,
+                satisfaction_comment: evaluationForm.comment,
+                evaluation: updatedEvaluation
               }
             : ticket
         ))
+      
+      // Update selected ticket
+      setSelectedTicket(prev => prev ? {
+        ...prev,
+        satisfaction_rating: evaluationForm.rating,
+        satisfaction_comment: evaluationForm.comment,
+        evaluation: updatedEvaluation
+      } : null)
+      
       setShowEvaluation(false)
       setEvaluationForm({ rating: 5, comment: '' })
       alert('Avaliação enviada com sucesso! Obrigado pelo seu feedback.')
-    } catch (error) {
+      
+      // Refresh ticket data to ensure consistency
+      setTimeout(() => {
+        fetchTickets()
+      }, 500)
+    } catch (error: any) {
       console.error('Error submitting evaluation:', error)
-      alert('Erro ao enviar avaliação. Tente novamente.')
+      const errorMessage = error.response?.data?.detail || error.message || 'Erro ao enviar avaliação'
+      alert(`Erro: ${errorMessage}`)
     }
   }
 
@@ -836,10 +1014,10 @@ export function SupportPage() {
                                   #{ticket.ticket_number || ticket.id}
                                 </span>
                                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${categoryColors[ticket.category] || 'bg-gray-100 text-gray-800'}`}>
-                                  {ticket.category}
+                                  {translateCategory(ticket.category)}
                                 </span>
                                 <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${priorityColors[ticket.priority] || 'bg-gray-100 text-gray-800'}`}>
-                                  {ticket.priority}
+                                  {translatePriority(ticket.priority)}
                                 </span>
                               </div>
                               <h3 className="text-base font-semibold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
@@ -850,7 +1028,7 @@ export function SupportPage() {
                           <div className="flex-shrink-0 ml-4">
                             <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${statusColors[ticket.status] || 'bg-gray-100 text-gray-800'}`}>
                               {getStatusIcon(ticket.status)}
-                              <span className="capitalize">{(ticket.status || '').replace('_', ' ')}</span>
+                              <span>{translateStatus(ticket.status || '')}</span>
                             </div>
                           </div>
                         </div>
@@ -908,17 +1086,28 @@ export function SupportPage() {
           ) : (
             /* Ticket Detail View */
             <div className="space-y-6">
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={() => setSelectedTicket(null)}
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  ← Voltar
-                </button>
-                <h2 className="text-xl font-semibold">Ticket #{selectedTicket.ticket_number}</h2>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedTicket.status]}`}>
-                  {(selectedTicket.status || '').replace('_', ' ')}
-                </span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => setSelectedTicket(null)}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    ← Voltar
+                  </button>
+                  <h2 className="text-xl font-semibold">Ticket #{selectedTicket.ticket_number}</h2>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedTicket.status]}`}>
+                    {translateStatus(selectedTicket.status || '')}
+                  </span>
+                </div>
+                {user?.role === 'citizen' && (
+                  <button
+                    onClick={() => navigate(`/chat?ticketId=${selectedTicket.id}`)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Conversar sobre este ticket</span>
+                  </button>
+                )}
               </div>
 
               {/* Ticket Info */}
@@ -928,11 +1117,11 @@ export function SupportPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
                     <span className="text-gray-500">Categoria:</span>
-                    <p className="font-medium">{selectedTicket.category}</p>
+                    <p className="font-medium">{translateCategory(selectedTicket.category)}</p>
                   </div>
                   <div>
                     <span className="text-gray-500">Prioridade:</span>
-                    <p className="font-medium">{selectedTicket.priority}</p>
+                    <p className="font-medium">{translatePriority(selectedTicket.priority)}</p>
                   </div>
                   <div>
                     <span className="text-gray-500">Criado em:</span>
@@ -946,30 +1135,91 @@ export function SupportPage() {
                   )}
                 </div>
                 
-                {/* Evaluation Section for Resolved Tickets */}
-                {selectedTicket.status === 'resolved' && (
+                {/* Status Update Section - Only for agents/managers */}
+                {user?.role !== 'citizen' && (
+                  <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <h4 className="font-semibold text-blue-800 mb-3">Atualizar Status</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedTicket.status !== 'open' && (
+                        <button
+                          onClick={() => updateTicketStatus(selectedTicket.id, 'open')}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                        >
+                          Abrir
+                        </button>
+                      )}
+                      {selectedTicket.status !== 'in_progress' && (
+                        <button
+                          onClick={() => updateTicketStatus(selectedTicket.id, 'in_progress')}
+                          className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm font-medium transition-colors"
+                        >
+                          Em Andamento
+                        </button>
+                      )}
+                      {selectedTicket.status !== 'waiting_client' && (
+                        <button
+                          onClick={() => updateTicketStatus(selectedTicket.id, 'waiting_client')}
+                          className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium transition-colors"
+                        >
+                          Aguardando Cliente
+                        </button>
+                      )}
+                      {selectedTicket.status !== 'resolved' && (
+                        <button
+                          onClick={() => updateTicketStatus(selectedTicket.id, 'resolved')}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium transition-colors"
+                        >
+                          Resolver
+                        </button>
+                      )}
+                      {selectedTicket.status !== 'closed' && (
+                        <button
+                          onClick={() => updateTicketStatus(selectedTicket.id, 'closed')}
+                          className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm font-medium transition-colors"
+                        >
+                          Fechar
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-blue-600 mt-2">
+                      Status atual: <span className="font-medium">{translateStatus(selectedTicket.status || '')}</span>
+                    </p>
+                  </div>
+                )}
+                
+                {/* Evaluation Section for Resolved/Closed Tickets */}
+                {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
                   <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-                    {selectedTicket.evaluation ? (
+                    {selectedTicket.satisfaction_rating || selectedTicket.evaluation ? (
                       <div>
                         <h4 className="font-semibold text-green-800 mb-2">Avaliação do Atendimento</h4>
                         <div className="flex items-center space-x-2 mb-2">
                           <span className="text-sm text-green-700">Nota:</span>
                           <div className="flex items-center space-x-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`w-4 h-4 ${i < selectedTicket.evaluation!.rating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
-                              />
-                            ))}
+                            {[...Array(5)].map((_, i) => {
+                              const rating = selectedTicket.satisfaction_rating || selectedTicket.evaluation?.rating || 0
+                              return (
+                                <Star
+                                  key={i}
+                                  className={`w-4 h-4 ${i < rating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`}
+                                />
+                              )
+                            })}
                           </div>
-                          <span className="text-sm text-green-700">({selectedTicket.evaluation.rating}/5)</span>
+                          <span className="text-sm text-green-700">
+                            ({(selectedTicket.satisfaction_rating || selectedTicket.evaluation?.rating || 0)}/5)
+                          </span>
                         </div>
-                        {selectedTicket.evaluation.comment && (
-                          <p className="text-sm text-green-700 italic">"{selectedTicket.evaluation.comment}"</p>
+                        {(selectedTicket.evaluation?.comment || selectedTicket.satisfaction_comment) && (
+                          <p className="text-sm text-green-700 italic mt-2">
+                            "{(selectedTicket.evaluation?.comment || selectedTicket.satisfaction_comment)}"
+                          </p>
                         )}
-                        <p className="text-xs text-green-600 mt-2">
-                          Avaliado em: {formatDate(selectedTicket.evaluation.evaluated_at)}
-                        </p>
+                        {selectedTicket.evaluation?.evaluated_at && (
+                          <p className="text-xs text-green-600 mt-2">
+                            Avaliado em: {formatDate(selectedTicket.evaluation.evaluated_at)}
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div>
@@ -1037,7 +1287,10 @@ export function SupportPage() {
                             )}
                             <span className="text-xs opacity-75">{formatDate(message.created_at)}</span>
                           </div>
-                          <p className="text-sm">{message.content}</p>
+                          <div 
+                            className="text-sm prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: message.content }}
+                          />
                         </div>
                       </div>
                     )
@@ -1130,23 +1383,49 @@ export function SupportPage() {
                     </div>
                   </div>
                 )}
-                {/* Message Form */}
+                {/* Message Form with Rich Text Editor */}
                 <form onSubmit={sendMessage} className="p-4 border-t">
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Digite sua mensagem..."
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!newMessage.trim()}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+                  <div className="space-y-2">
+                    <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+                      <ReactQuill
+                        theme="snow"
+                        value={newMessage}
+                        onChange={setNewMessage}
+                        placeholder="Digite sua mensagem..."
+                        modules={{
+                          toolbar: [
+                            [{ 'header': [1, 2, 3, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                            [{ 'color': [] }, { 'background': [] }],
+                            ['link'],
+                            ['clean']
+                          ]
+                        }}
+                        formats={[
+                          'header',
+                          'bold', 'italic', 'underline', 'strike',
+                          'list', 'bullet',
+                          'color', 'background',
+                          'link'
+                        ]}
+                        style={{ 
+                          minHeight: '120px',
+                          maxHeight: '200px'
+                        }}
+                        className="bg-white"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={!newMessage.replace(/<[^>]*>/g, '').trim()}
+                        className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Enviar</span>
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
@@ -1409,7 +1688,7 @@ export function SupportPage() {
                           <div className="flex items-center space-x-3">
                             <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status]}`}>
-                              {(ticket.status || '').replace('_', ' ')}
+                              {translateStatus(ticket.status || '')}
                             </span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority]}`}>
                               {ticket.priority}
@@ -1563,7 +1842,7 @@ export function SupportPage() {
                             <div className="flex items-center space-x-3">
                               <span className="font-mono text-sm text-gray-500">#{ticket.ticket_number}</span>
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status] || 'bg-gray-100 text-gray-800'}`}>
-                                {(ticket.status || '').replace('_', ' ')}
+                                {translateStatus(ticket.status || '')}
                               </span>
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityColors[ticket.priority] || 'bg-gray-100 text-gray-800'}`}>
                                 {ticket.priority}

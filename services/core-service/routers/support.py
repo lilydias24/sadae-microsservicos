@@ -37,7 +37,7 @@ except ImportError as e:
 
 from database import get_db
 from database_models import (
-    SupportTicket, TicketMessage, KnowledgeBaseArticle, SupportAgent
+    SupportTicket, TicketMessage, KnowledgeBaseArticle, SupportAgent, ServiceOrder
 )
 from schemas.support import (
     TicketCreate, TicketUpdate, TicketResponse, TicketAssign, TicketClose, TicketSatisfaction,
@@ -48,9 +48,18 @@ from schemas.support import (
     TicketMetrics, CategoryMetrics, DashboardMetrics,
     TicketSearch, KnowledgeBaseSearch, BulkTicketUpdate, BulkTicketAssign,
     KnowledgeBaseFeedback, PublicTicketCreate, PublicTicketResponse,
-    TicketStatus, TicketPriority, TicketCategory, MessageType
+    TicketStatus, TicketPriority, TicketCategory, MessageType, ForwardDepartment,
+    TicketForward, TicketForwardResponse
 )
 from business.ai_support import AISupportAssistant
+
+# SLA deadlines based on priority (in hours)
+SLA_HOURS = {
+    TicketPriority.URGENT: 2,
+    TicketPriority.HIGH: 4,
+    TicketPriority.MEDIUM: 24,
+    TicketPriority.LOW: 48,
+}
 
 router = APIRouter()
 
@@ -141,6 +150,9 @@ def verify_user_token(token: str) -> dict:
     
     Args:
         token: JWT token (without 'Bearer ' prefix) or full 'Bearer token' string
+    
+    Returns:
+        dict with keys: id, name, email, role
     """
     if not token:
         raise HTTPException(
@@ -152,14 +164,72 @@ def verify_user_token(token: str) -> dict:
     if token.startswith("Bearer "):
         token = token.split(" ", 1)[1]
     
-    user = verify_token(token)
-    return user
+    payload = verify_token(token)
+    
+    # Normalize user data from JWT payload
+    user_id = payload.get("sub") or payload.get("user_id") or payload.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido: ID do usuário não encontrado no payload"
+        )
+    
+    # Convert to int if it's a string (required for database)
+    if isinstance(user_id, str):
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token inválido: ID do usuário não é um número válido: {user_id}"
+            )
+    
+    return {
+        "id": int(user_id),  # Ensure it's always an int
+        "name": payload.get("name") or payload.get("username") or payload.get("full_name") or "Usuário",
+        "email": payload.get("email") or "",
+        "role": payload.get("role") or "citizen"
+    }
 
-def generate_ticket_number() -> str:
-    """Generate unique ticket number"""
-    timestamp = datetime.now().strftime("%Y%m%d")
-    unique_id = str(uuid.uuid4()).split('-')[0].upper()
-    return f"SUP-{timestamp}-{unique_id}"
+def generate_ticket_number(db: Session) -> str:
+    """Generate unique sequential ticket number in format TK001, TK002, etc."""
+    # Find all tickets with TK prefix to get the highest number
+    tickets_with_tk = db.query(SupportTicket).filter(
+        SupportTicket.ticket_number.like('TK%')
+    ).all()
+    
+    max_number = 0
+    
+    if tickets_with_tk:
+        for ticket in tickets_with_tk:
+            try:
+                # Extract number from formats like TK001, TK002, etc.
+                if ticket.ticket_number.startswith("TK"):
+                    # Remove "TK" prefix and convert to int
+                    number_str = ticket.ticket_number[2:].lstrip('0') or '0'
+                    number = int(number_str)
+                    max_number = max(max_number, number)
+            except (ValueError, AttributeError):
+                # Skip tickets with invalid format
+                continue
+    
+    # If no TK tickets found, check if there are any tickets at all
+    # and use the highest ID as fallback
+    if max_number == 0:
+        last_ticket = db.query(SupportTicket).order_by(SupportTicket.id.desc()).first()
+        if last_ticket:
+            # Use ticket ID as starting point
+            max_number = last_ticket.id
+    
+    # Get next number
+    next_number = max_number + 1
+    
+    # Format as TK001, TK002, etc. (padded to 3 digits minimum, can grow)
+    # For numbers > 999, it will be TK1000, TK1001, etc.
+    if next_number < 1000:
+        return f"TK{next_number:03d}"
+    else:
+        return f"TK{next_number}"
 
 def generate_slug(title: str) -> str:
     """Generate URL-friendly slug from title"""
@@ -188,39 +258,64 @@ async def create_ticket(
     db: Session = Depends(get_db)
 ):
     """Create new support ticket"""
-    user = verify_user_token(f"Bearer {credentials.credentials}")
-    
-    ticket = SupportTicket(
-        ticket_number=generate_ticket_number(),
-        title=ticket_data.title,
-        description=ticket_data.description,
-        category=ticket_data.category,
-        priority=ticket_data.priority,
-        client_id=user["id"],
-        client_name=user["name"],
-        client_email=user["email"],
-        client_phone=ticket_data.client_phone,
-        related_bill_id=ticket_data.related_bill_id,
-        related_order_id=ticket_data.related_order_id
-    )
-    
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-    
-    # Create initial system message
-    system_message = TicketMessage(
-        ticket_id=ticket.id,
-        message_type=MessageType.SYSTEM,
-        content=f"Ticket #{ticket.ticket_number} criado por {user['name']}",
-        author_user_id=user["id"],
-        author_name="Sistema",
-        is_internal=False
-    )
-    db.add(system_message)
-    db.commit()
-    
-    return ticket
+    try:
+        user = verify_user_token(f"Bearer {credentials.credentials}")
+        
+        print(f"🔍 Creating ticket for user: id={user['id']}, name={user['name']}, email={user['email']}")
+        print(f"📦 Ticket data: title={ticket_data.title[:50]}, category={ticket_data.category}, priority={ticket_data.priority}")
+        
+        # Generate ticket number (needs db session for sequential numbering)
+        ticket_number = generate_ticket_number(db)
+        print(f"🎫 Generated ticket number: {ticket_number}")
+        
+        ticket = SupportTicket(
+            ticket_number=ticket_number,
+            title=ticket_data.title,
+            description=ticket_data.description,
+            category=ticket_data.category,
+            priority=ticket_data.priority,
+            client_id=user["id"],
+            client_name=user["name"],
+            client_email=user["email"],
+            client_phone=ticket_data.client_phone,
+            related_bill_id=ticket_data.related_bill_id,
+            related_order_id=ticket_data.related_order_id,
+            sla_deadline=calculate_sla_deadline(ticket_data.priority),
+            escalation_level=0
+        )
+        
+        db.add(ticket)
+        db.commit()
+        db.refresh(ticket)
+        
+        print(f"✅ Ticket created: {ticket.ticket_number} (ID: {ticket.id})")
+        
+        # Create initial system message
+        system_message = TicketMessage(
+            ticket_id=ticket.id,
+            message_type=MessageType.SYSTEM,
+            content=f"Ticket #{ticket.ticket_number} criado por {user['name']}",
+            author_user_id=user["id"],
+            author_name="Sistema",
+            is_internal=False
+        )
+        db.add(system_message)
+        db.commit()
+        
+        return ticket
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Error creating ticket: {e}")
+        print(f"❌ Traceback: {error_trace}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao criar ticket: {str(e)}"
+        )
 
 @router.get("/tickets", response_model=List[TicketResponse])
 async def get_tickets(
@@ -406,7 +501,7 @@ async def rate_ticket(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Rate ticket satisfaction"""
+    """Rate ticket satisfaction - only once per ticket"""
     user = verify_user_token(f"Bearer {credentials.credentials}")
     
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
@@ -421,12 +516,411 @@ async def rate_ticket(
     if ticket.status not in [TicketStatus.RESOLVED, TicketStatus.CLOSED]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticket deve estar resolvido ou fechado")
     
+    # Check if ticket already has a rating (only allow one evaluation per ticket)
+    if ticket.satisfaction_rating is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Este ticket já foi avaliado. Cada ticket só pode ser avaliado uma vez."
+        )
+    
     ticket.satisfaction_rating = satisfaction_data.satisfaction_rating
     ticket.satisfaction_comment = satisfaction_data.satisfaction_comment
     
     db.commit()
+    db.refresh(ticket)
     
-    return {"message": "Avaliação registrada com sucesso"}
+    return {
+        "message": "Avaliação registrada com sucesso",
+        "satisfaction_rating": ticket.satisfaction_rating,
+        "satisfaction_comment": ticket.satisfaction_comment
+    }
+
+# ==================== TICKET FORWARDING ====================
+
+def generate_service_order_protocol():
+    """Generate unique protocol number for service order"""
+    return f"OS-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+def calculate_sla_deadline(priority: str) -> datetime:
+    """Calculate SLA deadline based on ticket priority"""
+    priority_enum = TicketPriority(priority) if isinstance(priority, str) else priority
+    hours = SLA_HOURS.get(priority_enum, 24)
+    return datetime.utcnow() + timedelta(hours=hours)
+
+@router.post("/tickets/{ticket_id}/forward", response_model=TicketForwardResponse)
+async def forward_ticket(
+    ticket_id: int,
+    forward_data: TicketForward,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Encaminha um ticket para outro departamento.
+    
+    - **maintenance**: Cria uma OS automaticamente
+    - **billing**: Cria uma contestação de fatura
+    - **monitoring**: Encaminha para análise de sensores
+    
+    Apenas agentes de suporte, operadores e gerentes podem encaminhar.
+    """
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    # Check permissions - only support agents, operators and managers can forward
+    allowed_roles = [
+        UserRole.SUPPORT_AGENT, 
+        UserRole.OPERATOR, 
+        UserRole.MAINTENANCE_MANAGER,
+        UserRole.FINANCIAL_MANAGER,
+        UserRole.CRISIS_MANAGER
+    ]
+    
+    user_role = user.get("role", "")
+    role_allowed = any(
+        user_role == role or user_role == getattr(role, 'value', str(role))
+        for role in allowed_roles
+    )
+    
+    if not role_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Apenas agentes de suporte e gerentes podem encaminhar tickets"
+        )
+    
+    # Get the ticket
+    ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado")
+    
+    # Check if ticket is already forwarded
+    if ticket.status == TicketStatus.FORWARDED.value or ticket.forwarded_to_department:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"Ticket já foi encaminhado para {ticket.forwarded_to_department}"
+        )
+    
+    # Check if ticket is closed/resolved
+    if ticket.status in [TicketStatus.CLOSED.value, TicketStatus.RESOLVED.value]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é possível encaminhar tickets fechados ou resolvidos"
+        )
+    
+    response_data = {
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.ticket_number,
+        "forwarded_to": forward_data.department,
+        "forwarded_at": datetime.utcnow(),
+        "service_order_id": None,
+        "service_order_protocol": None,
+        "bill_contest_id": None,
+        "message": ""
+    }
+    
+    # Handle forwarding based on department
+    if forward_data.department == ForwardDepartment.MAINTENANCE:
+        # Validate location for maintenance
+        if not forward_data.location:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Localização é obrigatória para encaminhamento à manutenção"
+            )
+        
+        # Create Service Order
+        protocol_number = generate_service_order_protocol()
+        
+        # Map ticket priority to service order priority
+        priority_map = {
+            "urgent": "critical",
+            "high": "high",
+            "medium": "medium",
+            "low": "low"
+        }
+        so_priority = priority_map.get(ticket.priority, "medium")
+        
+        service_order = ServiceOrder(
+            protocol_number=protocol_number,
+            title=f"[Ticket #{ticket.ticket_number}] {ticket.title}",
+            description=f"Origem: Ticket de Suporte #{ticket.ticket_number}\n\n"
+                       f"Descrição Original:\n{ticket.description}\n\n"
+                       f"Motivo do Encaminhamento:\n{forward_data.reason}\n\n"
+                       f"{f'Notas Adicionais: {forward_data.additional_notes}' if forward_data.additional_notes else ''}",
+            priority=so_priority,
+            location=forward_data.location,
+            status="open",
+            created_by=user["id"],
+            created_by_name=user["name"],
+            source_ticket_id=ticket.id,
+            source_ticket_number=ticket.ticket_number
+        )
+        
+        db.add(service_order)
+        db.flush()  # Get the ID without committing
+        
+        ticket.forwarded_service_order_id = service_order.id
+        response_data["service_order_id"] = service_order.id
+        response_data["service_order_protocol"] = protocol_number
+        response_data["message"] = f"Ticket encaminhado para Manutenção. OS criada: {protocol_number}"
+        
+    elif forward_data.department == ForwardDepartment.BILLING:
+        # For billing, we just mark as forwarded - billing team will handle
+        response_data["message"] = "Ticket encaminhado para o setor Financeiro"
+        
+    elif forward_data.department == ForwardDepartment.MONITORING:
+        # For monitoring, just mark as forwarded - monitoring team will handle
+        response_data["message"] = "Ticket encaminhado para o setor de Monitoramento"
+    
+    # Update ticket status and forwarding info
+    ticket.status = TicketStatus.FORWARDED.value
+    ticket.forwarded_to_department = forward_data.department.value
+    ticket.forwarded_at = datetime.utcnow()
+    ticket.forwarded_by_user_id = user["id"]
+    ticket.forwarded_by_name = user["name"]
+    
+    # Set SLA deadline if not already set
+    if not ticket.sla_deadline:
+        ticket.sla_deadline = calculate_sla_deadline(ticket.priority)
+    
+    # Add system message about forwarding
+    os_protocol = response_data.get('service_order_protocol', 'N/A')
+    os_info = f' | OS: {os_protocol}' if forward_data.department == ForwardDepartment.MAINTENANCE else ''
+    system_message = TicketMessage(
+        ticket_id=ticket_id,
+        message_type=MessageType.SYSTEM.value,
+        content=f"Ticket encaminhado para {forward_data.department.value.upper()} por {user['name']}.\nMotivo: {forward_data.reason}{os_info}",
+        author_user_id=user["id"],
+        author_name="Sistema",
+        is_internal=False
+    )
+    db.add(system_message)
+    
+    db.commit()
+    db.refresh(ticket)
+    
+    return response_data
+
+
+@router.get("/tickets/forwarded", response_model=List[TicketResponse])
+async def get_forwarded_tickets(
+    department: Optional[ForwardDepartment] = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista tickets encaminhados filtrados por departamento.
+    Usado pelos departamentos de destino para ver seus tickets recebidos.
+    """
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    query = db.query(SupportTicket).filter(SupportTicket.status == TicketStatus.FORWARDED.value)
+    
+    if department:
+        query = query.filter(SupportTicket.forwarded_to_department == department.value)
+    
+    tickets = query.order_by(desc(SupportTicket.forwarded_at)).all()
+    return tickets
+
+
+@router.get("/tickets/sla-alerts", response_model=List[TicketResponse])
+async def get_sla_alerts(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista tickets que estão próximos ou ultrapassaram o SLA.
+    Retorna tickets onde sla_deadline está a menos de 1 hora ou já passou.
+    """
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    now = datetime.utcnow()
+    warning_time = now + timedelta(hours=1)
+    
+    # Tickets with SLA approaching (within 1 hour) or exceeded
+    tickets = db.query(SupportTicket).filter(
+        and_(
+            SupportTicket.sla_deadline != None,
+            SupportTicket.sla_deadline <= warning_time,
+            SupportTicket.status.notin_([
+                TicketStatus.CLOSED.value, 
+                TicketStatus.RESOLVED.value
+            ])
+        )
+    ).order_by(SupportTicket.sla_deadline).all()
+    
+    return tickets
+
+
+@router.post("/tickets/escalate-overdue")
+async def escalate_overdue_tickets(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Escala automaticamente tickets que ultrapassaram o SLA.
+    Aumenta o nível de escalação e atualiza a prioridade se necessário.
+    
+    Pode ser chamado periodicamente por um job scheduler.
+    """
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    # Only managers and system can run escalation
+    allowed_roles = [
+        UserRole.MAINTENANCE_MANAGER,
+        UserRole.FINANCIAL_MANAGER,
+        UserRole.CRISIS_MANAGER,
+        UserRole.OPERATOR
+    ]
+    
+    user_role = user.get("role", "")
+    role_allowed = any(
+        user_role == role or user_role == getattr(role, 'value', str(role))
+        for role in allowed_roles
+    )
+    
+    if not role_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas gerentes podem executar a escalação de tickets"
+        )
+    
+    now = datetime.utcnow()
+    
+    # Find tickets that are overdue
+    overdue_tickets = db.query(SupportTicket).filter(
+        and_(
+            SupportTicket.sla_deadline != None,
+            SupportTicket.sla_deadline < now,
+            SupportTicket.status.notin_([
+                TicketStatus.CLOSED.value, 
+                TicketStatus.RESOLVED.value
+            ])
+        )
+    ).all()
+    
+    escalated_count = 0
+    escalation_details = []
+    
+    for ticket in overdue_tickets:
+        # Calculate how many hours overdue
+        hours_overdue = (now - ticket.sla_deadline).total_seconds() / 3600
+        
+        # Determine new escalation level based on how overdue
+        if hours_overdue >= 24:
+            new_level = 3  # Critical escalation
+            new_priority = TicketPriority.URGENT.value
+        elif hours_overdue >= 8:
+            new_level = 2  # High escalation
+            new_priority = TicketPriority.HIGH.value
+        elif hours_overdue >= 2:
+            new_level = 1  # First escalation
+            new_priority = ticket.priority  # Keep original priority
+        else:
+            continue  # Not enough overdue to escalate
+        
+        # Only escalate if level increased
+        if new_level > ticket.escalation_level:
+            old_level = ticket.escalation_level
+            old_priority = ticket.priority
+            
+            ticket.escalation_level = new_level
+            ticket.last_escalation_at = now
+            ticket.escalation_reason = f"SLA ultrapassado em {hours_overdue:.1f} horas"
+            
+            # Increase priority if escalation level is high
+            if new_level >= 2 and ticket.priority not in [TicketPriority.URGENT.value, TicketPriority.HIGH.value]:
+                ticket.priority = new_priority
+            
+            # Add system message about escalation
+            system_message = TicketMessage(
+                ticket_id=ticket.id,
+                message_type=MessageType.SYSTEM.value,
+                content=f"⚠️ ESCALAÇÃO AUTOMÁTICA: Ticket escalado de nível {old_level} para {new_level}. "
+                       f"SLA ultrapassado em {hours_overdue:.1f} horas. "
+                       f"{'Prioridade aumentada para ' + new_priority.upper() if ticket.priority != old_priority else ''}",
+                author_user_id=user["id"],
+                author_name="Sistema de Escalação",
+                is_internal=True
+            )
+            db.add(system_message)
+            
+            escalated_count += 1
+            escalation_details.append({
+                "ticket_id": ticket.id,
+                "ticket_number": ticket.ticket_number,
+                "old_level": old_level,
+                "new_level": new_level,
+                "hours_overdue": round(hours_overdue, 1),
+                "old_priority": old_priority,
+                "new_priority": ticket.priority
+            })
+    
+    db.commit()
+    
+    return {
+        "message": f"Escalação concluída. {escalated_count} tickets escalados.",
+        "escalated_count": escalated_count,
+        "total_overdue": len(overdue_tickets),
+        "escalation_details": escalation_details
+    }
+
+
+@router.post("/tickets/{ticket_id}/escalate")
+async def escalate_ticket_manually(
+    ticket_id: int,
+    reason: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Escala manualmente um ticket específico.
+    """
+    user = verify_user_token(f"Bearer {credentials.credentials}")
+    
+    ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado")
+    
+    if ticket.status in [TicketStatus.CLOSED.value, TicketStatus.RESOLVED.value]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Não é possível escalar tickets fechados ou resolvidos"
+        )
+    
+    old_level = ticket.escalation_level
+    ticket.escalation_level += 1
+    ticket.last_escalation_at = datetime.utcnow()
+    ticket.escalation_reason = reason
+    
+    # Increase priority if needed
+    priority_order = [TicketPriority.LOW.value, TicketPriority.MEDIUM.value, 
+                      TicketPriority.HIGH.value, TicketPriority.URGENT.value]
+    current_idx = priority_order.index(ticket.priority) if ticket.priority in priority_order else 1
+    
+    if ticket.escalation_level >= 2 and current_idx < len(priority_order) - 1:
+        ticket.priority = priority_order[min(current_idx + 1, len(priority_order) - 1)]
+    
+    # Add system message
+    system_message = TicketMessage(
+        ticket_id=ticket.id,
+        message_type=MessageType.SYSTEM.value,
+        content=f"🔺 ESCALAÇÃO MANUAL por {user['name']}: Nível {old_level} → {ticket.escalation_level}. "
+               f"Motivo: {reason}",
+        author_user_id=user["id"],
+        author_name="Sistema",
+        is_internal=False
+    )
+    db.add(system_message)
+    
+    db.commit()
+    db.refresh(ticket)
+    
+    return {
+        "message": f"Ticket escalado para nível {ticket.escalation_level}",
+        "ticket_id": ticket.id,
+        "ticket_number": ticket.ticket_number,
+        "old_level": old_level,
+        "new_level": ticket.escalation_level,
+        "current_priority": ticket.priority
+    }
 
 # ==================== TICKET MESSAGES ====================
 
@@ -753,9 +1247,9 @@ async def chat_websocket(websocket: WebSocket, ticket_id: int):
     
     try:
         # Verificar token e obter usuário
-        user = await verify_token(token)
-        user_id = user.get("id")
-        user_name = user.get("name", "Usuário")
+        user = verify_token(token)
+        user_id = user.get("sub") or user.get("id")
+        user_name = user.get("name", user.get("email", "Usuário"))
         user_role = user.get("role", "citizen")
         
         # Verificar se ticket existe e usuário tem acesso
@@ -767,8 +1261,8 @@ async def chat_websocket(websocket: WebSocket, ticket_id: int):
                 await websocket.close(code=1008, reason="Ticket não encontrado")
                 return
             
-            # Verificar permissões
-            if user_role == UserRole.CITIZEN and ticket.client_id != user_id:
+            # Verificar permissões (comparar com string value do enum)
+            if user_role == UserRole.CITIZEN.value and ticket.client_id != int(user_id):
                 await websocket.close(code=1008, reason="Acesso negado")
                 return
             
@@ -1257,8 +1751,11 @@ async def create_public_ticket(
     db: Session = Depends(get_db)
 ):
     """Create ticket without authentication (for public portal)"""
+    # Generate ticket number (needs db session for sequential numbering)
+    ticket_number = generate_ticket_number(db)
+    
     ticket = SupportTicket(
-        ticket_number=generate_ticket_number(),
+        ticket_number=ticket_number,
         title=ticket_data.title,
         description=ticket_data.description,
         category=ticket_data.category,

@@ -139,12 +139,12 @@ class SupportTicket(Base):
     __tablename__ = "support_tickets"
     
     id = Column(Integer, primary_key=True, index=True)
-    ticket_number = Column(String(20), unique=True, index=True)
+    ticket_number = Column(String(30), unique=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     category = Column(String(50), nullable=False)  # billing, technical, complaint, request, information, emergency
     priority = Column(String(20), nullable=False, default="medium")  # low, medium, high, urgent
-    status = Column(String(30), nullable=False, default="open")  # open, in_progress, waiting_client, resolved, closed
+    status = Column(String(30), nullable=False, default="open")  # open, in_progress, waiting_client, resolved, closed, forwarded
     client_id = Column(Integer, nullable=False)
     client_name = Column(String(100), nullable=False)
     client_email = Column(String(100), nullable=False)
@@ -160,8 +160,21 @@ class SupportTicket(Base):
     satisfaction_rating = Column(Integer, nullable=True)  # 1-5 stars
     satisfaction_comment = Column(Text, nullable=True)
     
+    # Forwarding and Escalation fields
+    forwarded_to_department = Column(String(50), nullable=True)  # maintenance, billing, monitoring, null if not forwarded
+    forwarded_at = Column(DateTime, nullable=True)
+    forwarded_by_user_id = Column(Integer, nullable=True)
+    forwarded_by_name = Column(String(100), nullable=True)
+    forwarded_service_order_id = Column(Integer, ForeignKey("service_orders.id"), nullable=True)  # Created service order
+    forwarded_bill_contest_id = Column(Integer, nullable=True)  # For billing department forwards
+    escalation_level = Column(Integer, default=0)  # 0=normal, 1=escalated once, 2=escalated twice, etc.
+    sla_deadline = Column(DateTime, nullable=True)  # When this ticket must be responded to
+    last_escalation_at = Column(DateTime, nullable=True)
+    escalation_reason = Column(String(500), nullable=True)
+    
     # Relationships
     messages = relationship("TicketMessage", back_populates="ticket", cascade="all, delete-orphan")
+    forwarded_service_order = relationship("ServiceOrder", foreign_keys=[forwarded_service_order_id])
 
 class TicketMessage(Base):
     __tablename__ = "ticket_messages"
@@ -242,6 +255,8 @@ class ServiceOrder(Base):
     notes = Column(Text, nullable=True)
     anomaly_id = Column(Integer, nullable=True)  # Reference to monitoring service anomaly
     complaint_id = Column(Integer, nullable=True)  # Reference to complaint
+    source_ticket_id = Column(Integer, nullable=True)  # Reference to support ticket that originated this order
+    source_ticket_number = Column(String(30), nullable=True)  # Ticket number for easy reference
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

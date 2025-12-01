@@ -214,6 +214,27 @@ async def get_service_orders(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@router.get("/orders/from-tickets", response_model=List[ServiceOrderResponse])
+async def get_orders_from_tickets(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100
+):
+    """
+    Lista ordens de serviço originadas de tickets de suporte.
+    Útil para acompanhar o fluxo de tickets encaminhados para manutenção.
+    """
+    user = await verify_user_token(f"Bearer {credentials.credentials}")
+    
+    query = db.query(ServiceOrder).filter(ServiceOrder.source_ticket_id != None)
+    
+    if status:
+        query = query.filter(ServiceOrder.status == status)
+    
+    orders = query.order_by(desc(ServiceOrder.created_at)).offset(skip).limit(limit).all()
+    return orders
 
 
 @router.get("/orders/{order_id}", response_model=ServiceOrderResponse)

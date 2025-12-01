@@ -2,11 +2,14 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import httpx
 import os
 import sys
+import json
 
 # Add shared modules to path
 sys.path.append('/app/shared')
@@ -62,15 +65,87 @@ app.add_middleware(
 # Additional CORS middleware to ensure headers are always present
 class CORSHeaderMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: StarletteRequest, call_next):
-        response = await call_next(request)
-        # Add CORS headers to all responses
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-        return response
+        try:
+            response = await call_next(request)
+            # Add CORS headers to all responses
+            response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            return response
+        except Exception as e:
+            # If an exception occurs, return a response with CORS headers
+            print(f"❌ CORSHeaderMiddleware caught exception: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                }
+            )
 
 app.add_middleware(CORSHeaderMiddleware)
+
+# Exception handlers to ensure CORS headers are always present
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTPException and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle StarletteHTTPException and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors and ensure CORS headers are present"""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions and ensure CORS headers are present"""
+    print(f"❌ Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type"
+        }
+    )
 
 security = HTTPBearer()
 
@@ -94,6 +169,14 @@ def add_cors_headers(response_data: any):
             }
         )
     return response_data
+
+def parse_error_detail(response):
+    """Helper function to parse error detail from response"""
+    try:
+        error_data = response.json()
+        return error_data.get("detail", response.text)
+    except:
+        return response.text
 
 async def proxy_request_to_service(
     service_name: str,
@@ -181,10 +264,19 @@ async def login(request: Request):
             
             if response.status_code != 200:
                 print(f"❌ Auth service error: {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=response.text)
+                # Parse error detail from JSON response
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get("detail", response.text)
+                except:
+                    error_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=error_detail)
                 
             return response.json()
             
+    except HTTPException:
+        # Re-raise HTTPException without modification
+        raise
     except httpx.ConnectError as e:
         print(f"❌ Connection error to auth service: {e}")
         raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
@@ -215,7 +307,8 @@ async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depe
             headers={"Authorization": f"Bearer {token}"}
         )
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            error_detail = parse_error_detail(response)
+            raise HTTPException(status_code=response.status_code, detail=error_detail)
         return response.json()
 
 @app.put("/auth/me")
@@ -234,8 +327,96 @@ async def update_current_user(request: Request, credentials: HTTPAuthorizationCr
             }
         )
         if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            error_detail = parse_error_detail(response)
+            raise HTTPException(status_code=response.status_code, detail=error_detail)
         return response.json()
+
+@app.post("/auth/forgot-password")
+async def forgot_password(request: Request):
+    """Request password reset"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying forgot-password to: {auth_url}/forgot-password")
+            
+            response = await client.post(
+                f"{auth_url}/forgot-password",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Forgot password failed: {e}")
+
+@app.post("/auth/verify-reset-token")
+async def verify_reset_token(request: Request):
+    """Verify password reset token"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            
+            response = await client.post(
+                f"{auth_url}/verify-reset-token",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/reset-password")
+async def reset_password(request: Request):
+    """Reset password with token"""
+    body = await request.body()
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            auth_url = service_registry.get_service_url('auth')
+            print(f"🔍 Proxying reset-password to: {auth_url}/reset-password")
+            
+            response = await client.post(
+                f"{auth_url}/reset-password",
+                content=body,
+                headers={"content-type": "application/json"}
+            )
+            
+            print(f"✅ Auth service response: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ Auth service error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+                
+            return response.json()
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to auth service: {e}")
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Reset password failed: {e}")
 
 # Monitoring routes
 @app.get("/monitoring/sensors")
@@ -571,21 +752,90 @@ async def get_support_tickets(credentials: HTTPAuthorizationCredentials = Depend
 @app.post("/support/tickets")
 async def create_support_ticket(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create support ticket"""
-    verify_token(credentials.credentials)
-    
-    body = await request.body()
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{service_registry.get_service_url('core')}/support/tickets",
-            content=body,
+    try:
+        verify_token(credentials.credentials)
+        
+        body = await request.body()
+        body_str = body.decode('utf-8') if body else '{}'
+        print(f"🔍 Proxying ticket creation to core service")
+        print(f"📦 Request body: {body_str[:200]}...")
+        
+        core_url = service_registry.get_service_url('core')
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{core_url}/support/tickets",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "Authorization": f"Bearer {credentials.credentials}"
+                }
+            )
+            
+            print(f"✅ Core service response: {response.status_code}")
+            
+            if response.status_code >= 400:
+                # Try to parse error details
+                try:
+                    error_data = response.json()
+                    error_detail = error_data
+                    print(f"❌ Core service error (JSON): {error_detail}")
+                except:
+                    error_detail = {"detail": response.text}
+                    print(f"❌ Core service error (text): {error_detail}")
+                
+                # Return error with CORS headers, preserving the original error structure
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content=error_detail if isinstance(error_detail, dict) else {"detail": str(error_detail)},
+                    headers={
+                        "Access-Control-Allow-Origin": "http://localhost:3000",
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                        "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                    }
+                )
+            
+            result = response.json() if response.text else {}
+            print(f"✅ Ticket created successfully: {result.get('id', 'unknown')}")
+            return add_cors_headers(result)
+            
+    except httpx.ConnectError as e:
+        print(f"❌ Connection error to core service: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Core service unavailable: {e}"},
             headers={
-                "content-type": "application/json",
-                "Authorization": f"Bearer {credentials.credentials}"
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
             }
         )
-        result = response.json() if response.text else {}
-        return add_cors_headers(result)
+    except httpx.TimeoutException as e:
+        print(f"❌ Timeout error: {e}")
+        return JSONResponse(
+            status_code=504,
+            content={"detail": f"Core service timeout: {e}"},
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
+            }
+        )
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal server error: {e}"},
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type"
+            }
+        )
 
 @app.get("/support/tickets/{ticket_id}")
 async def get_support_ticket(ticket_id: int, credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -647,6 +897,54 @@ async def create_ticket_message(ticket_id: int, request: Request, credentials: H
             }
         )
         return response.json()
+
+@app.post("/support/tickets/{ticket_id}/evaluate")
+async def evaluate_ticket(ticket_id: int, request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Evaluate ticket (alias for /satisfaction)"""
+    verify_token(credentials.credentials)
+    
+    body = await request.body()
+    body_str = body.decode('utf-8') if body else '{}'
+    
+    # Parse and transform the request body
+    try:
+        data = json.loads(body_str)
+        # Transform evaluationForm format to satisfaction format
+        satisfaction_data = {
+            "satisfaction_rating": data.get("rating", data.get("satisfaction_rating", 5)),
+            "satisfaction_comment": data.get("comment", data.get("satisfaction_comment", ""))
+        }
+        body = json.dumps(satisfaction_data).encode('utf-8')
+    except:
+        pass  # If parsing fails, send as is
+    
+    core_url = service_registry.get_service_url('core')
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{core_url}/support/tickets/{ticket_id}/satisfaction",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "Authorization": f"Bearer {credentials.credentials}"
+            }
+        )
+        
+        if response.status_code >= 400:
+            error_detail = parse_error_detail(response)
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"detail": error_detail},
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type"
+                }
+            )
+        
+        result = response.json() if response.text else {}
+        return add_cors_headers(result)
 
 @app.get("/support/knowledge-base")
 async def get_knowledge_base(category: str = None, featured_only: bool = False):

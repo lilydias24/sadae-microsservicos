@@ -73,6 +73,9 @@ class ServiceOrderResponse(ServiceOrderBase):
     estimated_completion: Optional[datetime] = None
     actual_cost: Optional[float] = None
     notes: Optional[str] = None
+    # Ticket origin fields
+    source_ticket_id: Optional[int] = None
+    source_ticket_number: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     

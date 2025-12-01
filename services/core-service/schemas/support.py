@@ -12,6 +12,7 @@ class TicketStatus(str, Enum):
     WAITING_CLIENT = "waiting_client"
     RESOLVED = "resolved"
     CLOSED = "closed"
+    FORWARDED = "forwarded"
 
 class TicketPriority(str, Enum):
     LOW = "low"
@@ -26,6 +27,11 @@ class TicketCategory(str, Enum):
     REQUEST = "request"
     INFORMATION = "information"
     EMERGENCY = "emergency"
+
+class ForwardDepartment(str, Enum):
+    MAINTENANCE = "maintenance"
+    BILLING = "billing"
+    MONITORING = "monitoring"
 
 class MessageType(str, Enum):
     CLIENT = "client"
@@ -64,6 +70,25 @@ class TicketSatisfaction(BaseModel):
     satisfaction_rating: int = Field(..., ge=1, le=5)
     satisfaction_comment: Optional[str] = Field(None, max_length=1000)
 
+# Ticket Forwarding schemas
+class TicketForward(BaseModel):
+    department: ForwardDepartment
+    reason: str = Field(..., min_length=10, max_length=1000)
+    location: Optional[str] = Field(None, max_length=200)  # Required for maintenance
+    additional_notes: Optional[str] = Field(None, max_length=2000)
+
+class TicketForwardResponse(BaseModel):
+    ticket_id: int
+    ticket_number: str
+    forwarded_to: ForwardDepartment
+    forwarded_at: datetime
+    service_order_id: Optional[int] = None  # If forwarded to maintenance
+    service_order_protocol: Optional[str] = None
+    bill_contest_id: Optional[int] = None  # If forwarded to billing
+    message: str
+
+    model_config = ConfigDict(from_attributes=True)
+
 class TicketResponse(BaseModel):
     id: int
     ticket_number: str
@@ -86,6 +111,17 @@ class TicketResponse(BaseModel):
     satisfaction_comment: Optional[str] = None
     related_bill_id: Optional[int] = None
     related_order_id: Optional[int] = None
+    # Forwarding fields
+    forwarded_to_department: Optional[str] = None
+    forwarded_at: Optional[datetime] = None
+    forwarded_by_name: Optional[str] = None
+    forwarded_service_order_id: Optional[int] = None
+    forwarded_bill_contest_id: Optional[int] = None
+    # Escalation fields
+    escalation_level: int = 0
+    sla_deadline: Optional[datetime] = None
+    last_escalation_at: Optional[datetime] = None
+    escalation_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
