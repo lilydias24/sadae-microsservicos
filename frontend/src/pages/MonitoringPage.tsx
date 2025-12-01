@@ -272,37 +272,41 @@ export function MonitoringPage() {
 
   // Debug: Verificar se botão está no DOM e adicionar listener direto
   useEffect(() => {
+    let foundButton: HTMLButtonElement | null = null
+    let directHandler: ((e: Event) => void) | null = null
+    
     const checkButton = () => {
       // Procurar por qualquer botão que contenha "Configurar Alertas"
       const buttons = document.querySelectorAll('button')
-      let foundButton: HTMLElement | null = null
       
       buttons.forEach(btn => {
-        if (btn.textContent?.includes('Configurar Alertas')) {
+        if (btn.textContent?.includes('Configurar Alertas') && btn instanceof HTMLButtonElement) {
           foundButton = btn
         }
       })
       
       if (foundButton) {
         // Adicionar listener direto no DOM (fallback caso o onClick do React não funcione)
-        const directHandler = (e: Event) => {
+        directHandler = (e: Event) => {
           e.preventDefault()
           e.stopPropagation()
           handleOpenAlertConfig()
         }
         
         foundButton.addEventListener('click', directHandler, true) // useCapture = true
-        
-        return () => {
-          foundButton?.removeEventListener('click', directHandler, true)
-        }
       }
     }
     
     // Verificar após um pequeno delay para garantir que o DOM foi renderizado
     const timeout = setTimeout(checkButton, 1000)
     
-    return () => clearTimeout(timeout)
+    return () => {
+      clearTimeout(timeout)
+      if (foundButton && directHandler) {
+        foundButton.removeEventListener('click', directHandler, true)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Generate smart meters based on network sensors
