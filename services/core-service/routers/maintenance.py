@@ -910,18 +910,37 @@ async def generate_interventions_report(
     
     maintenances = query.order_by(desc(Maintenance.completion_date)).all()
     
-    # Calculate statistics
+    # Calculate comprehensive statistics
     total_interventions = len(maintenances)
     total_cost = sum(float(m.cost or 0) for m in maintenances)
     avg_cost = total_cost / total_interventions if total_interventions > 0 else 0
     
-    # Calculate average time (TMR - Time to Repair)
+    # Calculate average time (TMR - Time to Repair) and response time
     total_duration_hours = 0
+    total_response_hours = 0
+    completed_count = 0
+    response_count = 0
+    
     for m in maintenances:
-        if m.service_order and m.completion_date and m.service_order.created_at:
-            duration = (m.completion_date - m.service_order.created_at).total_seconds() / 3600
-            total_duration_hours += duration
-    avg_duration_hours = total_duration_hours / total_interventions if total_interventions > 0 else 0
+        if m.service_order:
+            # Time to Repair (from creation to completion)
+            if m.completion_date and m.service_order.created_at:
+                duration = (m.completion_date - m.service_order.created_at).total_seconds() / 3600
+                total_duration_hours += duration
+                completed_count += 1
+            
+            # Response time (from creation to start/assignment)
+            if m.service_order.assigned_at and m.service_order.created_at:
+                response_time = (m.service_order.assigned_at - m.service_order.created_at).total_seconds() / 3600
+                total_response_hours += response_time
+                response_count += 1
+    
+    avg_duration_hours = total_duration_hours / completed_count if completed_count > 0 else 0
+    avg_response_hours = total_response_hours / response_count if response_count > 0 else 0
+    
+    # Completion rate
+    completed_interventions = sum(1 for m in maintenances if m.completion_date is not None)
+    completion_rate = (completed_interventions / total_interventions * 100) if total_interventions > 0 else 0
     
     # Team statistics
     team_stats = {}
@@ -931,20 +950,35 @@ async def generate_interventions_report(
             if team not in team_stats:
                 team_stats[team] = {
                     "total_interventions": 0,
+                    "completed_interventions": 0,
                     "total_cost": 0,
-                    "total_duration_hours": 0
+                    "total_duration_hours": 0,
+                    "total_response_hours": 0
                 }
             team_stats[team]["total_interventions"] += 1
             team_stats[team]["total_cost"] += float(m.cost or 0)
+            if m.completion_date:
+                team_stats[team]["completed_interventions"] += 1
             if m.service_order.created_at and m.completion_date:
                 duration = (m.completion_date - m.service_order.created_at).total_seconds() / 3600
                 team_stats[team]["total_duration_hours"] += duration
+            if m.service_order.created_at and m.service_order.assigned_at:
+                response_time = (m.service_order.assigned_at - m.service_order.created_at).total_seconds() / 3600
+                team_stats[team]["total_response_hours"] += response_time
     
-    # Calculate averages for each team
+    # Calculate averages and rates for each team
     for team, stats in team_stats.items():
         if stats["total_interventions"] > 0:
-            stats["avg_cost"] = stats["total_cost"] / stats["total_interventions"]
-            stats["avg_duration_hours"] = stats["total_duration_hours"] / stats["total_interventions"]
+            stats["avg_cost"] = round(stats["total_cost"] / stats["total_interventions"], 2)
+            stats["completion_rate"] = round((stats["completed_interventions"] / stats["total_interventions"]) * 100, 2)
+            if stats["completed_interventions"] > 0:
+                stats["avg_duration_hours"] = round(stats["total_duration_hours"] / stats["completed_interventions"], 2)
+            else:
+                stats["avg_duration_hours"] = 0
+            if stats["total_interventions"] > 0:
+                stats["avg_response_hours"] = round(stats["total_response_hours"] / stats["total_interventions"], 2)
+            else:
+                stats["avg_response_hours"] = 0
     
     report_id = generate_protocol_number()
     
@@ -953,9 +987,12 @@ async def generate_interventions_report(
         "filters": filters.dict(),
         "summary": {
             "total_interventions": total_interventions,
+            "completed_interventions": completed_interventions,
+            "completion_rate": round(completion_rate, 2),
             "total_cost": round(total_cost, 2),
             "average_cost": round(avg_cost, 2),
             "average_duration_hours": round(avg_duration_hours, 2),
+            "average_response_hours": round(avg_response_hours, 2),
             "period": {
                 "start": filters.start_date.isoformat() if filters.start_date else None,
                 "end": filters.end_date.isoformat() if filters.end_date else None
@@ -973,14 +1010,15 @@ async def generate_interventions_report(
                     "description": m.service_order.description if m.service_order else None,
                     "location": m.service_order.location if m.service_order else None,
                 } if m.service_order else None,
-                "description": m.description,
+                "description": m.description or "",
                 "cost": float(m.cost or 0),
-                "duration_hours": m.duration_hours,
+                "duration_hours": float(m.duration_hours or 0) if m.duration_hours else 0.0,
                 "completed_at": m.completion_date.isoformat() if m.completion_date else None,
-                "team_name": m.service_order.assigned_team if m.service_order else None
+                "team_name": m.service_order.assigned_team if m.service_order else None,
+                "created_at": m.service_order.created_at.isoformat() if m.service_order and m.service_order.created_at else None
             }
             for m in maintenances
         ],
-        "generated_at": datetime.now(),
+        "generated_at": datetime.now().isoformat(),
         "generated_by": user.get("name", "Unknown")
     }

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Request, Body, Response
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Request, Body, Response, Query, Path
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -51,32 +52,56 @@ from schemas.billing import (
 from business.billing_calculator import BillingCalculator
 
 router = APIRouter()
+security = HTTPBearer()
 
 # Billing calculator
 billing_calculator = BillingCalculator()
 
-async def verify_user_token(authorization: str):
-    """Verify user token locally"""
-    try:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authorization header"
-            )
-        
-        token = authorization.split(" ")[1]
-        payload = verify_token(token)
-        
-        return {
-            "id": payload.get("sub"),
-            "email": payload.get("email"),
-            "role": payload.get("role")
-        }
-    except Exception:
+def verify_user_token(token: str) -> dict:
+    """Verify JWT token and return user info
+    
+    Args:
+        token: JWT token (without 'Bearer ' prefix) or full 'Bearer token' string
+    
+    Returns:
+        dict with keys: id, name, email, role
+    """
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail="Token não fornecido"
         )
+    
+    # Remove 'Bearer ' prefix if present
+    if token.startswith("Bearer "):
+        token = token.split(" ", 1)[1]
+    
+    payload = verify_token(token)
+    
+    # Normalize user data from JWT payload
+    user_id = payload.get("sub") or payload.get("user_id") or payload.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido: ID do usuário não encontrado no payload"
+        )
+    
+    # Convert to int if it's a string (required for database)
+    if isinstance(user_id, str):
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token inválido: ID do usuário não é um número válido: {user_id}"
+            )
+    
+    return {
+        "id": int(user_id),  # Ensure it's always an int
+        "name": payload.get("name") or payload.get("username") or payload.get("full_name") or "Usuário",
+        "email": payload.get("email") or "",
+        "role": payload.get("role") or "citizen"
+    }
 
 # Test endpoint (temporary - no auth required)
 @router.get("/test-data")
@@ -175,7 +200,7 @@ async def create_customer(
     """
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Check if customer already exists
@@ -230,8 +255,8 @@ async def create_customer(
     tags=["Clientes"]
 )
 async def get_customers(
-    skip: int = Field(0, description="Número de registros para pular (paginação)", ge=0, example=0),
-    limit: int = Field(100, description="Número máximo de registros a retornar", ge=1, le=1000, example=100),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
@@ -241,7 +266,7 @@ async def get_customers(
     Requer permissões de financial_manager.
     """
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     customers = db.query(Customer).offset(skip).limit(limit).all()
@@ -283,7 +308,7 @@ async def get_customers(
     tags=["Clientes"]
 )
 async def get_customer(
-    customer_id: int = Field(..., description="ID do cliente", example=1, gt=0),
+    customer_id: int = Path(..., gt=0),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
@@ -299,7 +324,7 @@ async def get_customer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     
     # Citizens can only see their own data
-    if user["role"] == UserRole.CITIZEN and customer.user_id != user["id"]:
+    if user["role"] == "citizen" and customer.user_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     
     return customer
@@ -314,7 +339,7 @@ async def create_water_meter(
     """Create water meter (financial manager only)"""
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Check if meter ID already exists
@@ -347,7 +372,7 @@ async def get_water_meters(
         query = query.filter(WaterMeter.is_active == True)
     
     # Citizens can only see their own meters
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if customer:
             query = query.filter(WaterMeter.customer_id == customer.id)
@@ -422,16 +447,18 @@ async def get_meter_readings(
         query = query.filter(MeterReading.reading_date <= end_date)
     
     # Citizens can only see their own readings
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if customer:
             meter_ids = [m.meter_id for m in db.query(WaterMeter).filter(WaterMeter.customer_id == customer.id).all()]
-            query = query.filter(MeterReading.meter_id.in_(meter_ids))
+            if meter_ids:
+                query = query.filter(MeterReading.meter_id.in_(meter_ids))
         else:
             return {"readings": []}
     elif customer_id:
         meter_ids = [m.meter_id for m in db.query(WaterMeter).filter(WaterMeter.customer_id == customer_id).all()]
-        query = query.filter(MeterReading.meter_id.in_(meter_ids))
+        if meter_ids:
+            query = query.filter(MeterReading.meter_id.in_(meter_ids))
     
     readings = query.order_by(MeterReading.reading_date.desc()).all()
     return {"readings": readings}
@@ -487,10 +514,10 @@ async def get_meter_readings(
 )
 async def get_bills(
     request: Request,
-    customer_id: Optional[int] = Field(None, description="ID do cliente para filtrar faturas", example=5),
-    status: Optional[str] = Field(None, description="Status da fatura: pending, paid, overdue, contested", example="pending"),
-    skip: int = Field(0, description="Número de registros para pular", ge=0, example=0),
-    limit: int = Field(100, description="Número máximo de registros", ge=1, le=1000, example=100),
+    customer_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
     """
@@ -508,7 +535,7 @@ async def get_bills(
         query = query.filter(Bill.status == status)
     
     # Citizens can only see their own bills
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if customer:
             query = query.filter(Bill.customer_id == customer.id)
@@ -556,7 +583,7 @@ async def get_bills(
     tags=["Faturas"]
 )
 async def get_bill(
-    bill_id: int = Field(..., description="ID da fatura", example=1, gt=0),
+    bill_id: int = Path(..., gt=0),
     authorization: str = Depends(lambda request: request.headers.get("Authorization")),
     db: Session = Depends(get_db)
 ):
@@ -572,7 +599,7 @@ async def get_bill(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     
     # Citizens can only see their own bills
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -589,7 +616,7 @@ async def generate_bills(
     """Generate bills for all customers (financial manager only)"""
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     generated_count = 0
@@ -669,7 +696,7 @@ async def create_bill_contest(
     if not bill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -738,9 +765,9 @@ async def create_bill_contest(
 )
 async def get_bill_contests(
     request: Request,
-    status: Optional[str] = Field(None, description="Status da contestação: pending, approved, rejected", example="pending"),
-    skip: int = Field(0, description="Número de registros para pular", ge=0, example=0),
-    limit: int = Field(100, description="Número máximo de registros", ge=1, le=1000, example=100),
+    status: Optional[str] = Query(None, description="Status da contestação: pending, approved, rejected"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
     """
@@ -757,11 +784,12 @@ async def get_bill_contests(
         query = query.filter(BillContest.status == status)
     
     # Citizens can only see their own contests
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if customer:
             bill_ids = [b.id for b in db.query(Bill).filter(Bill.customer_id == customer.id).all()]
-            query = query.filter(BillContest.bill_id.in_(bill_ids))
+            if bill_ids:
+                query = query.filter(BillContest.bill_id.in_(bill_ids))
         else:
             return []
     
@@ -784,7 +812,7 @@ async def resolve_bill_contest(
         authorization = req.headers.get("Authorization")
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] != UserRole.FINANCIAL_MANAGER:
+        if user["role"] != "financial_manager":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         
         contest = db.query(BillContest).filter(BillContest.id == contest_id).first()
@@ -884,7 +912,7 @@ async def create_debt_negotiation(
     try:
         user = await verify_user_token(authorization)
         print(f"🔍 User verified: {user}")
-        if user["role"] != UserRole.FINANCIAL_MANAGER:
+        if user["role"] != "financial_manager":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         
         # Check if customer has active negotiation
@@ -976,8 +1004,8 @@ async def create_debt_negotiation(
 )
 async def get_debt_negotiations(
     request: Request,
-    customer_id: Optional[int] = Field(None, description="ID do cliente para filtrar negociações", example=5),
-    status: Optional[str] = Field(None, description="Status da negociação: proposed, active, cancelled, completed", example="proposed"),
+    customer_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -994,7 +1022,7 @@ async def get_debt_negotiations(
         query = query.filter(DebtNegotiation.status == status)
     
     # Citizens can only see their own negotiations
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if customer:
             query = query.filter(DebtNegotiation.customer_id == customer.id)
@@ -1016,7 +1044,7 @@ async def resolve_debt_negotiation(
     """Resolve debt negotiation (financial manager only)"""
     authorization = request.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Try to find by string ID first, then by integer ID
@@ -1069,7 +1097,7 @@ async def pay_bill(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bill already paid")
     
     # Citizens can only pay their own bills
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -1141,7 +1169,7 @@ async def process_payment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bill already paid")
     
     # Citizens can only pay their own bills
-    if user["role"] == UserRole.CITIZEN:
+    if user["role"] == "citizen":
         customer = db.query(Customer).filter(Customer.user_id == user["id"]).first()
         if not customer or bill.customer_id != customer.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -1205,7 +1233,7 @@ async def create_tariff_rate(
     """Create tariff rate (financial manager only)"""
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     tariff = TariffRate(**tariff_data.dict())
@@ -1271,7 +1299,7 @@ async def test_debt_negotiation(
     """Test endpoint for debt negotiation"""
     authorization = req.headers.get("Authorization")
     user = await verify_user_token(authorization)
-    if user["role"] != UserRole.FINANCIAL_MANAGER:
+    if user["role"] != "financial_manager":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     
     # Simple creation without business logic
@@ -1300,12 +1328,11 @@ class BillingReportFilters(BaseModel):
 @router.post("/reports/billing")
 async def generate_billing_report(
     filters: BillingReportFilters,
-    req: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
     """Generate billing report"""
-    authorization = req.headers.get("Authorization")
-    user = await verify_user_token(authorization)
+    user = verify_user_token(f"Bearer {credentials.credentials}")
     
     # Check permissions
     user_role = user.get("role", "")
@@ -1354,8 +1381,45 @@ async def generate_billing_report(
     avg_consumption = total_consumption / total_bills if total_bills > 0 else 0
     
     # Paid vs unpaid
-    paid_amount = sum(float(bill.amount) for bill in bills if bill.status == "paid")
+    paid_bills = [b for b in bills if b.status == "paid"]
+    unpaid_bills = [b for b in bills if b.status != "paid"]
+    paid_amount = sum(float(bill.amount) for bill in paid_bills)
     unpaid_amount = total_amount - paid_amount
+    
+    # Payment rate
+    payment_rate = (len(paid_bills) / total_bills * 100) if total_bills > 0 else 0
+    
+    # Overdue bills
+    today = datetime.now().date()
+    overdue_bills = [b for b in unpaid_bills if b.due_date and b.due_date < today]
+    overdue_amount = sum(float(bill.amount) for bill in overdue_bills)
+    
+    # Average consumption per customer
+    customer_consumption = {}
+    for bill in bills:
+        if bill.customer_id:
+            if bill.customer_id not in customer_consumption:
+                customer_consumption[bill.customer_id] = {"bills": 0, "total_consumption": 0, "total_amount": 0}
+            customer_consumption[bill.customer_id]["bills"] += 1
+            customer_consumption[bill.customer_id]["total_consumption"] += float(bill.consumption or 0)
+            customer_consumption[bill.customer_id]["total_amount"] += float(bill.amount)
+    
+    # Calculate averages per customer
+    for customer_id, stats in customer_consumption.items():
+        if stats["bills"] > 0:
+            stats["avg_consumption"] = round(stats["total_consumption"] / stats["bills"], 2)
+            stats["avg_amount"] = round(stats["total_amount"] / stats["bills"], 2)
+    
+    # Bills by month (for trend analysis)
+    bills_by_month = {}
+    for bill in bills:
+        if bill.billing_period_start:
+            month_key = bill.billing_period_start.strftime("%Y-%m")
+            if month_key not in bills_by_month:
+                bills_by_month[month_key] = {"count": 0, "total_amount": 0, "total_consumption": 0}
+            bills_by_month[month_key]["count"] += 1
+            bills_by_month[month_key]["total_amount"] += float(bill.amount)
+            bills_by_month[month_key]["total_consumption"] += float(bill.consumption or 0)
     
     report_id = generate_protocol_number()
     
@@ -1368,9 +1432,16 @@ async def generate_billing_report(
             "total_consumption": round(total_consumption, 2),
             "average_amount": round(avg_amount, 2),
             "average_consumption": round(avg_consumption, 2),
+            "paid_bills": len(paid_bills),
             "paid_amount": round(paid_amount, 2),
+            "unpaid_bills": len(unpaid_bills),
             "unpaid_amount": round(unpaid_amount, 2),
+            "payment_rate": round(payment_rate, 2),
+            "overdue_bills": len(overdue_bills),
+            "overdue_amount": round(overdue_amount, 2),
             "status_breakdown": status_breakdown,
+            "customer_statistics": customer_consumption,
+            "bills_by_month": bills_by_month,
             "period": {
                 "start": filters.start_date.isoformat() if filters.start_date else None,
                 "end": filters.end_date.isoformat() if filters.end_date else None
@@ -1381,14 +1452,14 @@ async def generate_billing_report(
                 "id": bill.id,
                 "customer_id": bill.customer_id,
                 "meter_id": bill.meter_id,
-                "amount": float(bill.amount),
+                "amount": float(bill.amount) if bill.amount else 0.0,
                 "consumption": float(bill.consumption or 0),
-                "billing_period_start": bill.billing_period_start.isoformat(),
-                "billing_period_end": bill.billing_period_end.isoformat(),
+                "billing_period_start": bill.billing_period_start.isoformat() if bill.billing_period_start else None,
+                "billing_period_end": bill.billing_period_end.isoformat() if bill.billing_period_end else None,
                 "due_date": bill.due_date.isoformat() if bill.due_date else None,
-                "status": bill.status,
+                "status": bill.status or "unknown",
                 "paid_at": bill.paid_at.isoformat() if bill.paid_at else None,
-                "created_at": bill.created_at.isoformat()
+                "created_at": bill.created_at.isoformat() if bill.created_at else None
             }
             for bill in bills[:1000]  # Limit to 1000 for performance
         ],

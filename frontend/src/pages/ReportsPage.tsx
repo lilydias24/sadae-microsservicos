@@ -1008,6 +1008,10 @@ export function ReportsPage() {
                     {Object.entries(generatedReport.summary).map(([key, value]: [string, any]) => {
                       // Skip period object, it will be shown separately
                       if (key === 'period' && typeof value === 'object') return null
+                      // Skip complex objects (statistics, breakdowns, etc.)
+                      if (typeof value === 'object' && value !== null && !Array.isArray(value)) return null
+                      // Skip arrays
+                      if (Array.isArray(value)) return null
                       
                       // Translate labels to Portuguese
                       const labelMap: { [key: string]: string } = {
@@ -1019,7 +1023,30 @@ export function ReportsPage() {
                         'total_cost': 'Custo Total',
                         'average_repair_time': 'Tempo Médio de Reparo',
                         'period': 'Período',
-                        'team_statistics': 'Estatísticas por Equipe'
+                        'team_statistics': 'Estatísticas por Equipe',
+                        'total_bills': 'Total de Faturas',
+                        'total_amount': 'Valor Total',
+                        'total_consumption': 'Consumo Total',
+                        'average_amount': 'Valor Médio',
+                        'average_consumption': 'Consumo Médio',
+                        'paid_bills': 'Faturas Pagas',
+                        'paid_amount': 'Valor Pago',
+                        'unpaid_bills': 'Faturas Não Pagas',
+                        'unpaid_amount': 'Valor Não Pago',
+                        'payment_rate': 'Taxa de Pagamento (%)',
+                        'overdue_bills': 'Faturas Vencidas',
+                        'overdue_amount': 'Valor Vencido',
+                        'total_tickets': 'Total de Tickets',
+                        'resolved_tickets': 'Tickets Resolvidos',
+                        'resolution_rate': 'Taxa de Resolução (%)',
+                        'average_response_time_hours': 'Tempo Médio de Resposta (h)',
+                        'average_resolution_time_hours': 'Tempo Médio de Resolução (h)',
+                        'average_satisfaction': 'Satisfação Média',
+                        'completed_interventions': 'Intervenções Concluídas',
+                        'completion_rate': 'Taxa de Conclusão (%)',
+                        'average_cost': 'Custo Médio',
+                        'average_duration_hours': 'Duração Média (h)',
+                        'average_response_hours': 'Tempo Médio de Resposta (h)'
                       }
                       const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
                       
@@ -1027,18 +1054,22 @@ export function ReportsPage() {
                       
                       // Format numbers
                       if (typeof value === 'number') {
-                        if (key.includes('value') || key.includes('average') || key.includes('min') || key.includes('max')) {
+                        if (key.includes('value') || key.includes('average') || key.includes('min') || key.includes('max') || key.includes('amount') || key.includes('cost') || key.includes('consumption')) {
                           displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        } else if (key.includes('rate') || key.includes('satisfaction')) {
+                          displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
                         } else {
                           displayValue = value.toLocaleString('pt-BR')
                         }
+                      } else if (value === null || value === undefined) {
+                        displayValue = 'N/A'
                       }
                       
                       return (
                         <div key={key} className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
                           <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1">{label}</p>
                           <p className="text-2xl font-bold text-blue-900">
-                            {displayValue}
+                            {String(displayValue)}
                           </p>
                         </div>
                       )
@@ -1079,6 +1110,120 @@ export function ReportsPage() {
                             }
                           </span>
                         </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Statistics breakdowns */}
+                  {generatedReport.summary.statistics && (
+                    <div className="mt-6">
+                      <h4 className="text-md font-semibold text-gray-900 mb-3">Estatísticas Detalhadas</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {Object.entries(generatedReport.summary.statistics).map(([key, value]: [string, any]) => {
+                          if (typeof value === 'object' && value !== null) return null
+                          const statLabelMap: { [key: string]: string } = {
+                            'average_value': 'Média',
+                            'min_value': 'Mínimo',
+                            'max_value': 'Máximo',
+                            'standard_deviation': 'Desvio Padrão'
+                          }
+                          const label = statLabelMap[key] || key.replace(/_/g, ' ')
+                          return (
+                            <div key={key} className="bg-gray-50 p-3 rounded border border-gray-200">
+                              <p className="text-xs font-medium text-gray-600 mb-1">{label}</p>
+                              <p className="text-lg font-bold text-gray-900">
+                                {typeof value === 'number' ? value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value)}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {generatedReport.summary.statistics.percentiles && (
+                        <div className="mt-4">
+                          <h5 className="text-sm font-semibold text-gray-700 mb-2">Percentis</h5>
+                          <div className="grid grid-cols-4 gap-2">
+                            {Object.entries(generatedReport.summary.statistics.percentiles).map(([key, value]: [string, any]) => (
+                              <div key={key} className="bg-gray-50 p-2 rounded text-center">
+                                <p className="text-xs text-gray-600">{key.toUpperCase()}</p>
+                                <p className="text-sm font-bold">{typeof value === 'number' ? value.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : String(value)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Status/Category breakdowns */}
+                  {(generatedReport.summary.status_breakdown || generatedReport.summary.category_breakdown || generatedReport.summary.priority_breakdown) && (
+                    <div className="mt-6">
+                      <h4 className="text-md font-semibold text-gray-900 mb-3">Distribuições</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {generatedReport.summary.status_breakdown && (
+                          <div className="bg-gray-50 p-4 rounded border border-gray-200">
+                            <h5 className="text-sm font-semibold text-gray-700 mb-2">Por Status</h5>
+                            {Object.entries(generatedReport.summary.status_breakdown).map(([status, data]: [string, any]) => (
+                              <div key={status} className="flex justify-between text-sm py-1">
+                                <span className="text-gray-600">{status === 'open' ? 'Aberto' : status === 'in_progress' ? 'Em Andamento' : status === 'resolved' ? 'Resolvido' : status === 'closed' ? 'Fechado' : status === 'paid' ? 'Pago' : status === 'pending' ? 'Pendente' : status === 'overdue' ? 'Vencido' : status}:</span>
+                                <span className="font-medium">{data.count || data}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {generatedReport.summary.category_breakdown && (
+                          <div className="bg-gray-50 p-4 rounded border border-gray-200">
+                            <h5 className="text-sm font-semibold text-gray-700 mb-2">Por Categoria</h5>
+                            {Object.entries(generatedReport.summary.category_breakdown).map(([category, count]: [string, any]) => (
+                              <div key={category} className="flex justify-between text-sm py-1">
+                                <span className="text-gray-600">{category === 'billing' ? 'Faturamento' : category === 'technical' ? 'Técnico' : category === 'complaint' ? 'Reclamação' : category === 'request' ? 'Solicitação' : category === 'information' ? 'Informação' : category === 'emergency' ? 'Emergência' : category}:</span>
+                                <span className="font-medium">{typeof count === 'object' ? count.count : count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {generatedReport.summary.priority_breakdown && (
+                          <div className="bg-gray-50 p-4 rounded border border-gray-200">
+                            <h5 className="text-sm font-semibold text-gray-700 mb-2">Por Prioridade</h5>
+                            {Object.entries(generatedReport.summary.priority_breakdown).map(([priority, count]: [string, any]) => (
+                              <div key={priority} className="flex justify-between text-sm py-1">
+                                <span className="text-gray-600">{priority === 'low' ? 'Baixa' : priority === 'medium' ? 'Média' : priority === 'high' ? 'Alta' : priority === 'urgent' ? 'Urgente' : priority}:</span>
+                                <span className="font-medium">{typeof count === 'object' ? count.count : count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Team statistics */}
+                  {generatedReport.team_statistics && Object.keys(generatedReport.team_statistics).length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="text-md font-semibold text-gray-900 mb-3">Estatísticas por Equipe</h4>
+                      <div className="space-y-3">
+                        {Object.entries(generatedReport.team_statistics).map(([team, stats]: [string, any]) => (
+                          <div key={team} className="bg-gray-50 p-4 rounded border border-gray-200">
+                            <h5 className="text-sm font-semibold text-gray-700 mb-2">{team}</h5>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                              <div>
+                                <span className="text-gray-600">Total: </span>
+                                <span className="font-medium">{stats.total_interventions || 0}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Concluídas: </span>
+                                <span className="font-medium">{stats.completed_interventions || 0}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Taxa: </span>
+                                <span className="font-medium">{typeof stats.completion_rate === 'number' ? stats.completion_rate.toFixed(1) : stats.completion_rate || 0}%</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Custo Médio: </span>
+                                <span className="font-medium">R$ {typeof stats.avg_cost === 'number' ? stats.avg_cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : stats.avg_cost || '0,00'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -1190,21 +1335,79 @@ export function ReportsPage() {
                                 'category': 'Categoria',
                                 'resolved_at': 'Resolvido em',
                                 'satisfaction_rating': 'Avaliação de Satisfação',
-                                'assigned_agent_id': 'ID do Agente Atribuído'
+                                'assigned_agent_id': 'ID do Agente Atribuído',
+                                'client_name': 'Nome do Cliente'
                               }
                               const label = fieldLabelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
                               let displayValue = value
                               
-                              // Format dates
-                              if (key.includes('date') || key.includes('timestamp') || key.includes('at') || 
-                                  (typeof value === 'string' && value.includes('T'))) {
+                              // Translate category values to Portuguese
+                              if (key === 'category' && typeof value === 'string') {
+                                const categoryMap: { [key: string]: string } = {
+                                  'billing': 'Faturamento',
+                                  'technical': 'Técnico',
+                                  'complaint': 'Reclamação',
+                                  'request': 'Solicitação',
+                                  'information': 'Informação',
+                                  'emergency': 'Emergência'
+                                }
+                                displayValue = categoryMap[value.toLowerCase()] || value
+                              }
+                              // Translate status values to Portuguese
+                              else if (key === 'status' && typeof value === 'string') {
+                                const statusMap: { [key: string]: string } = {
+                                  'open': 'Aberto',
+                                  'in_progress': 'Em Andamento',
+                                  'waiting_client': 'Aguardando Cliente',
+                                  'resolved': 'Resolvido',
+                                  'closed': 'Fechado',
+                                  'reopened': 'Reaberto',
+                                  'escalated': 'Escalado'
+                                }
+                                displayValue = statusMap[value.toLowerCase()] || value
+                              }
+                              // Translate priority values to Portuguese
+                              else if (key === 'priority' && typeof value === 'string') {
+                                const priorityMap: { [key: string]: string } = {
+                                  'low': 'Baixa',
+                                  'medium': 'Média',
+                                  'high': 'Alta',
+                                  'urgent': 'Urgente'
+                                }
+                                displayValue = priorityMap[value.toLowerCase()] || value
+                              }
+                              // Ensure ticket_number is displayed as string
+                              else if (key === 'ticket_number') {
+                                displayValue = String(value || 'N/A')
+                              }
+                              // Format dates - only for fields that end with '_at', '_date', or contain 'timestamp'
+                              else if ((key.endsWith('_at') || key.endsWith('_date') || key.includes('timestamp')) && 
+                                       typeof value === 'string' && value.includes('T')) {
                                 try {
-                                  displayValue = new Date(value).toLocaleString('pt-BR')
+                                  displayValue = new Date(value).toLocaleString('pt-BR', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
                                 } catch (e) {
                                   displayValue = String(value)
                                 }
-                              } else if (typeof value === 'number') {
-                                displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                              }
+                              // Format numbers
+                              else if (typeof value === 'number') {
+                                if (key.includes('rating') || key.includes('rate')) {
+                                  displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
+                                } else if (key.includes('amount') || key.includes('cost') || key.includes('value') || key.includes('consumption')) {
+                                  displayValue = value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                } else {
+                                  displayValue = value.toLocaleString('pt-BR')
+                                }
+                              }
+                              // Handle null/undefined
+                              else if (value === null || value === undefined) {
+                                displayValue = 'N/A'
                               }
                               
                               return (

@@ -456,14 +456,64 @@ async def generate_sensor_report(
     
     readings = query.order_by(SensorReading.timestamp.desc()).all()
     
-    # Generate report summary
+    # Generate report summary with comprehensive statistics
     total_readings = len(readings)
+    
     if total_readings > 0:
-        avg_value = sum(r.value for r in readings) / total_readings
-        min_value = min(r.value for r in readings)
-        max_value = max(r.value for r in readings)
+        values = [r.value for r in readings]
+        avg_value = sum(values) / total_readings
+        min_value = min(values)
+        max_value = max(values)
+        
+        # Calculate standard deviation
+        variance = sum((x - avg_value) ** 2 for x in values) / total_readings
+        std_deviation = variance ** 0.5
+        
+        # Calculate percentiles (25th, 50th, 75th, 95th)
+        sorted_values = sorted(values)
+        percentile_25 = sorted_values[int(total_readings * 0.25)] if total_readings > 0 else 0
+        percentile_50 = sorted_values[int(total_readings * 0.50)] if total_readings > 0 else 0
+        percentile_75 = sorted_values[int(total_readings * 0.75)] if total_readings > 0 else 0
+        percentile_95 = sorted_values[int(total_readings * 0.95)] if total_readings > 0 else 0
+        
+        # Statistics by sensor type
+        sensor_type_stats = {}
+        for reading in readings:
+            sensor_type = reading.sensor_type or "unknown"
+            if sensor_type not in sensor_type_stats:
+                sensor_type_stats[sensor_type] = {
+                    "count": 0,
+                    "values": []
+                }
+            sensor_type_stats[sensor_type]["count"] += 1
+            sensor_type_stats[sensor_type]["values"].append(reading.value)
+        
+        # Calculate averages for each sensor type
+        for sensor_type, stats in sensor_type_stats.items():
+            if stats["values"]:
+                stats["average"] = round(sum(stats["values"]) / len(stats["values"]), 2)
+                stats["min"] = min(stats["values"])
+                stats["max"] = max(stats["values"])
+                del stats["values"]  # Remove raw values to reduce response size
+        
+        # Statistics by location
+        location_stats = {}
+        for reading in readings:
+            location = reading.location or "unknown"
+            if location not in location_stats:
+                location_stats[location] = {"count": 0, "total_value": 0}
+            location_stats[location]["count"] += 1
+            location_stats[location]["total_value"] += reading.value
+        
+        for location, stats in location_stats.items():
+            stats["average"] = round(stats["total_value"] / stats["count"], 2) if stats["count"] > 0 else 0
+            del stats["total_value"]
+        
     else:
-        avg_value = min_value = max_value = 0
+        avg_value = min_value = max_value = std_deviation = 0
+        percentile_25 = percentile_50 = percentile_75 = percentile_95 = 0
+        sensor_type_stats = {}
+        location_stats = {}
     
     report_id = generate_protocol_number()
     
@@ -472,9 +522,20 @@ async def generate_sensor_report(
         "filters": filters.dict(),
         "summary": {
             "total_readings": total_readings,
-            "average_value": round(avg_value, 2),
-            "min_value": min_value,
-            "max_value": max_value,
+            "statistics": {
+                "average_value": round(avg_value, 2),
+                "min_value": round(min_value, 2),
+                "max_value": round(max_value, 2),
+                "standard_deviation": round(std_deviation, 2),
+                "percentiles": {
+                    "p25": round(percentile_25, 2),
+                    "p50": round(percentile_50, 2),
+                    "p75": round(percentile_75, 2),
+                    "p95": round(percentile_95, 2)
+                }
+            },
+            "by_sensor_type": sensor_type_stats,
+            "by_location": location_stats,
             "period": {
                 "start": filters.start_date.isoformat() if filters.start_date else None,
                 "end": filters.end_date.isoformat() if filters.end_date else None

@@ -1593,23 +1593,78 @@ async def generate_support_report(
     tickets_with_response = 0
     tickets_with_resolution = 0
     
+    # Agent statistics
+    agent_stats = {}
+    
     for ticket in tickets:
+        # Response time calculation (time to first update/message)
         if ticket.updated_at and ticket.created_at:
             response_time = (ticket.updated_at - ticket.created_at).total_seconds() / 3600
             total_response_time += response_time
             tickets_with_response += 1
         
+        # Resolution time calculation
         if ticket.resolved_at and ticket.created_at:
             resolution_time = (ticket.resolved_at - ticket.created_at).total_seconds() / 3600
             total_resolution_time += resolution_time
             tickets_with_resolution += 1
+        
+        # Agent statistics
+        if ticket.assigned_agent_id:
+            agent_id = ticket.assigned_agent_id
+            agent_name = ticket.assigned_agent_name or f"Agente {agent_id}"
+            if agent_id not in agent_stats:
+                agent_stats[agent_id] = {
+                    "agent_name": agent_name,
+                    "total_tickets": 0,
+                    "resolved_tickets": 0,
+                    "total_resolution_time": 0,
+                    "total_response_time": 0,
+                    "tickets_with_response": 0
+                }
+            agent_stats[agent_id]["total_tickets"] += 1
+            if ticket.resolved_at:
+                agent_stats[agent_id]["resolved_tickets"] += 1
+                if ticket.created_at:
+                    resolution_time = (ticket.resolved_at - ticket.created_at).total_seconds() / 3600
+                    agent_stats[agent_id]["total_resolution_time"] += resolution_time
+            if ticket.updated_at and ticket.created_at:
+                response_time = (ticket.updated_at - ticket.created_at).total_seconds() / 3600
+                agent_stats[agent_id]["total_response_time"] += response_time
+                agent_stats[agent_id]["tickets_with_response"] += 1
+    
+    # Calculate averages for agents
+    for agent_id, stats in agent_stats.items():
+        if stats["total_tickets"] > 0:
+            stats["resolution_rate"] = round((stats["resolved_tickets"] / stats["total_tickets"]) * 100, 2)
+            if stats["resolved_tickets"] > 0:
+                stats["avg_resolution_time"] = round(stats["total_resolution_time"] / stats["resolved_tickets"], 2)
+            else:
+                stats["avg_resolution_time"] = 0
+            if stats["tickets_with_response"] > 0:
+                stats["avg_response_time"] = round(stats["total_response_time"] / stats["tickets_with_response"], 2)
+            else:
+                stats["avg_response_time"] = 0
     
     avg_response_time = total_response_time / tickets_with_response if tickets_with_response > 0 else 0
     avg_resolution_time = total_resolution_time / tickets_with_resolution if tickets_with_resolution > 0 else 0
     
+    # Resolution rate
+    resolved_tickets = sum(1 for t in tickets if t.resolved_at is not None or str(t.status).lower() == 'resolved')
+    resolution_rate = (resolved_tickets / total_tickets * 100) if total_tickets > 0 else 0
+    
     # Satisfaction average
     satisfaction_ratings = [t.satisfaction_rating for t in tickets if t.satisfaction_rating is not None]
     avg_satisfaction = sum(satisfaction_ratings) / len(satisfaction_ratings) if satisfaction_ratings else 0
+    
+    # Tickets by day (for trend analysis)
+    tickets_by_day = {}
+    for ticket in tickets:
+        day_key = ticket.created_at.date().isoformat() if ticket.created_at else None
+        if day_key:
+            if day_key not in tickets_by_day:
+                tickets_by_day[day_key] = 0
+            tickets_by_day[day_key] += 1
     
     report_id = generate_protocol_number()
     
@@ -1618,12 +1673,16 @@ async def generate_support_report(
         "filters": filters.dict(),
         "summary": {
             "total_tickets": total_tickets,
+            "resolved_tickets": resolved_tickets,
+            "resolution_rate": round(resolution_rate, 2),
             "status_breakdown": status_breakdown,
             "category_breakdown": category_breakdown,
             "priority_breakdown": priority_breakdown,
             "average_response_time_hours": round(avg_response_time, 2),
             "average_resolution_time_hours": round(avg_resolution_time, 2),
             "average_satisfaction": round(avg_satisfaction, 2),
+            "agent_statistics": agent_stats,
+            "tickets_by_day": tickets_by_day,
             "period": {
                 "start": filters.start_date.isoformat() if filters.start_date else None,
                 "end": filters.end_date.isoformat() if filters.end_date else None
@@ -1634,9 +1693,9 @@ async def generate_support_report(
                 "id": ticket.id,
                 "ticket_number": ticket.ticket_number,
                 "title": ticket.title,
-                "category": ticket.category.value if hasattr(ticket.category, 'value') else str(ticket.category),
-                "priority": ticket.priority.value if hasattr(ticket.priority, 'value') else str(ticket.priority),
-                "status": ticket.status.value if hasattr(ticket.status, 'value') else str(ticket.status),
+                "category": str(ticket.category) if ticket.category else None,
+                "priority": str(ticket.priority) if ticket.priority else None,
+                "status": str(ticket.status) if ticket.status else None,
                 "client_name": ticket.client_name,
                 "assigned_agent_id": ticket.assigned_agent_id,
                 "created_at": ticket.created_at.isoformat(),
