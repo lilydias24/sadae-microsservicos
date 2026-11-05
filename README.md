@@ -235,6 +235,25 @@ docker exec [container-name] python [script.py]
 ```
 
 
+## Minha contribuição
+
+Atuei principalmente no **módulo de atendimento** e nos **relatórios**, do front-end
+ao backend:
+
+- páginas de suporte, chat de atendimento e widget de chat (React + TypeScript), com
+  avaliação dos atendimentos;
+- fluxo de tickets e registro de observações;
+- página de relatórios e ajustes nas rotas de suporte, manutenção, monitoramento e
+  faturamento do `core-service`;
+- integração das rotas no `api-gateway` e ajustes no contexto de autenticação do front-end.
+
+## Sobre este repositório
+
+Cópia, com histórico, do repositório original do grupo no GitLab da UNIPAMPA
+(componente Resolução de Problemas IV, 2025/2). A branch `main` contém a versão
+integrada pelo grupo; as demais são o trabalho individual de cada integrante
+(a minha é `Emy_branch`). Os e-mails dos colaboradores foram anonimizados no histórico.
+
 ## Licença
 
 Este projeto é parte do trabalho acadêmico do componente RPIV.
